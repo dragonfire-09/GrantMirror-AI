@@ -1708,8 +1708,8 @@ def render_evaluation_page():
 # MAIN
 # ═══════════════════════════════════════════════════════════
 def main():
-    inject_modern_css()  
     render_header()
+    inject_modern_css()
     page = st.sidebar.radio(
         "📌",
         ["🔬 Değerlendirme", "📡 Canlı Çağrılar", "📰 Haberler"],
