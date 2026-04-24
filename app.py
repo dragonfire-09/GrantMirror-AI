@@ -39,6 +39,34 @@ from rag_engine import get_criterion_context as rag_get_context, ai_enhanced_ret
 # ═══════════════════════════════════════════════════════════
 st.set_page_config(page_title="GrantMirror-AI", page_icon="🔬", layout="wide", initial_sidebar_state="expanded")
 
+st.markdown("""<style>
+@import url('https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&display=swap');
+html,body,[class*="css"]{font-family:'Inter',-apple-system,sans-serif!important}
+.stApp{background:#f8fafc}
+section[data-testid="stSidebar"]{background:linear-gradient(180deg,#1e1b4b,#312e81,#3730a3)!important}
+section[data-testid="stSidebar"] *{color:#e0e7ff!important}
+section[data-testid="stSidebar"] .stMarkdown h2{color:#fff!important;font-weight:700!important}
+section[data-testid="stSidebar"] hr{border-color:rgba(165,180,252,.2)!important}
+section[data-testid="stSidebar"] .stExpander{background:rgba(255,255,255,.06)!important;border:1px solid rgba(255,255,255,.1)!important;border-radius:10px!important}
+div[data-testid="stMetricValue"]{font-weight:700!important;font-size:1.4rem!important}
+div[data-testid="stMetricLabel"]{font-weight:500!important;text-transform:uppercase!important;font-size:.75rem!important;letter-spacing:.03em!important}
+div[data-testid="stVerticalBlockBorderWrapper"]{border-radius:12px!important}
+.stButton>button{border-radius:10px!important;font-weight:600!important;transition:all .2s!important}
+.stButton>button[kind="primary"]{background:linear-gradient(135deg,#6366f1,#4f46e5)!important;border:none!important;color:#fff!important;box-shadow:0 2px 8px rgba(99,102,241,.3)!important}
+.stButton>button[kind="primary"]:hover{box-shadow:0 4px 16px rgba(99,102,241,.4)!important;transform:translateY(-1px)!important}
+.stExpander{background:#fff!important;border:1px solid #e2e8f0!important;border-radius:12px!important;box-shadow:0 1px 3px rgba(0,0,0,.04)!important}
+.stTabs [data-baseweb="tab-list"]{gap:.5rem;background:#fff;padding:.3rem;border-radius:10px;border:1px solid #e2e8f0}
+.stTabs [aria-selected="true"]{background:#6366f1!important;color:#fff!important;border-radius:8px!important}
+[data-testid="stFileUploader"]{border:2px dashed #e2e8f0!important;border-radius:16px!important;padding:2rem!important;background:#fff!important}
+[data-testid="stFileUploader"]:hover{border-color:#818cf8!important;background:#f5f3ff!important}
+.stDownloadButton>button{background:#fff!important;border:1px solid #e2e8f0!important;border-radius:10px!important;font-weight:600!important}
+.stDownloadButton>button:hover{border-color:#6366f1!important;background:#f5f3ff!important}
+.stProgress>div>div{background:linear-gradient(90deg,#6366f1,#06b6d4)!important;border-radius:10px!important}
+.stAlert{border-radius:10px!important}
+div[data-testid="stContainer"]{border-radius:12px!important}
+</style>""", unsafe_allow_html=True)
+
+
 if "call_cache" not in st.session_state:
     st.session_state.call_cache = CallCache(ttl_minutes=30)
 
