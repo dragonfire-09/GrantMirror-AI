@@ -1355,14 +1355,14 @@ def render_feature_dashboard():
     st.markdown("## 🎯 GrantMirror-AI Ne Yapar?")
 
     features = [
-        ("📡", "Canlı Çağrı", "Güncel Horizon çağrılarını çeker.", "Canlı Veri"),
+        ("📡", "Canlı Çağrı", "EC API üzerinden güncel Horizon çağrılarını çeker.", "Live Data"),
         ("🎯", "AI Eşleştirme", "En uygun çağrılarla eşleştirir.", "Matching"),
         ("🧠", "RAG Motor", "Kriter bazlı bilgi analizi yapar.", "Knowledge"),
         ("📋", "ESR Simülasyon", "Hakem değerlendirmesi üretir.", "Evaluator"),
         ("🛠️", "Koçluk", "Somut iyileştirme önerileri verir.", "Coaching"),
         ("📊", "Güven Aralığı", "Fonlanma olasılığı hesaplar.", "Prediction"),
         ("🔒", "Kimlik Taraması", "Kör değerlendirme kontrolü.", "Blind"),
-        ("📰", "Canlı Haberler", "Güncel EU haberleri.", "News"),
+        ("📰", "Canlı Haberler", "Güncel EU ve UfukAvrupa haberlerini izler.", "News"),
     ]
 
     html = '<div style="display:grid;grid-template-columns:repeat(4,1fr);gap:16px;margin-top:20px;">'
