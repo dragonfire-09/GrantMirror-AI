@@ -1049,7 +1049,7 @@ def render_overall(results):
     c1, c2, c3, c4 = st.columns(4)
     delta_val = tw - thr
     delta_sign = "+" if delta_val >= 0 else ""
-        with c1:
+    with c1:
         st.markdown(f"""
         <div class="gm-metric">
             <div class="gm-metric-value" style="color:{total_color};">{tw}/{tm}</div>
