@@ -459,8 +459,14 @@ def fetch_euresearch_calls(
         return []
 
     try:
+        params = {}
+        if search_text:
+            params["filter_search"] = search_text
+            params["filter_submit"] = "Filter"
+
         response = requests.get(
             EURESEARCH_URL,
+            params=params,
             timeout=30,
             headers={
                 "User-Agent": "Mozilla/5.0 GrantMirror-AI/1.0",
@@ -472,70 +478,105 @@ def fetch_euresearch_calls(
             return []
 
         soup = BeautifulSoup(response.text, "html.parser")
-        text = soup.get_text("\n", strip=True)
-
-        lines = [clean_html(x) for x in text.split("\n") if clean_html(x)]
 
         calls = []
-        current_category = ""
+        current_destination = ""
 
-        for line in lines:
-            if line in ["Horizon Europe", "Call/Topic", "Open", "Deadline"]:
+        # Başlıkları destination/category olarak yakala
+        for element in soup.find_all(["h2", "h3", "h4", "tr"]):
+            tag_name = element.name
+
+            if tag_name in ["h2", "h3", "h4"]:
+                heading = clean_html(element.get_text(" ", strip=True))
+                if heading and heading.lower() not in [
+                    "open calls",
+                    "filter options",
+                    "horizon europe",
+                ]:
+                    current_destination = heading
                 continue
 
-            if line.startswith("HORIZON-") or line.startswith("EIC-") or line.startswith("ERC-"):
-                call_id_match = re.match(r"^([A-Z0-9\-]+)", line)
-                call_id = call_id_match.group(1) if call_id_match else line[:50]
-                title = line[len(call_id):].strip(" -–")
+            if tag_name == "tr":
+                cells = [
+                    clean_html(td.get_text(" ", strip=True))
+                    for td in element.find_all(["td", "th"])
+                ]
 
-                action_types = _detect_action_types_from_text(line)
+                if len(cells) < 3:
+                    continue
 
-                calls.append({
+                first = cells[0]
+                opening = cells[1]
+                deadline = cells[2]
+
+                if not re.search(r"HORIZON-|EIC-|ERC-|MSCA-", first):
+                    continue
+
+                call_id_match = re.search(
+                    r"(HORIZON-[A-Z0-9\-]+|EIC-[A-Z0-9\-]+|ERC-[A-Z0-9\-]+|MSCA-[A-Z0-9\-]+)",
+                    first,
+                )
+
+                if not call_id_match:
+                    continue
+
+                call_id = call_id_match.group(1)
+                title = first.replace(call_id, "").strip(" -–|")
+
+                deadline_date = _parse_date_safe(deadline)
+                opening_date = _parse_date_safe(opening)
+
+                deadline_clean = (
+                    deadline_date.isoformat() if deadline_date else deadline
+                )
+
+                opening_clean = (
+                    opening_date.isoformat() if opening_date else opening
+                )
+
+                action_types = _detect_action_types_from_text(first)
+
+                link = EURESEARCH_URL
+                a = element.find("a", href=True)
+                if a:
+                    href = a.get("href")
+                    if href.startswith("http"):
+                        link = href
+                    else:
+                        link = "https://www.euresearch.ch" + href
+
+                call = {
                     "call_id": call_id,
                     "title": title or call_id,
                     "status": "Open",
                     "programme": "HORIZON",
-                    "opening_date": "",
-                    "deadline": "N/A",
+                    "opening_date": opening_clean,
+                    "deadline": deadline_clean,
                     "budget": "",
                     "budget_total": "",
                     "budget_per_project": "",
                     "action_types": action_types,
                     "topics": [{"topic_id": call_id, "title": title or call_id}],
                     "keywords": [],
-                    "destination": current_category,
+                    "destination": current_destination,
                     "description": "",
                     "scope": "",
                     "expected_outcomes": "",
-                    "url": EURESEARCH_URL,
-                    "link": EURESEARCH_URL,
+                    "url": link,
+                    "link": link,
                     "raw": {},
                     "source": "Euresearch",
-                })
+                }
 
-            elif not re.search(r"\d{1,2}\s+[A-Za-z]{3,9}\s+\d{4}", line):
-                if len(line) > 4 and len(line) < 120:
-                    current_category = line
-
-        # Try to assign deadlines from nearby page text is not reliable after get_text;
-        # keep Euresearch primarily as call discovery source.
-        filtered = []
-
-        for call in calls:
-            if not _keep_only_current_horizon(call):
-                continue
-
-            if search_text:
-                kw = search_text.lower()
-                if kw not in f"{call['call_id']} {call['title']} {call['destination']}".lower():
+                if not _keep_only_current_horizon(call):
                     continue
 
-            if status and call.get("status") != status:
-                continue
+                if status and call.get("status") != status:
+                    continue
 
-            filtered.append(call)
+                calls.append(call)
 
-        return filtered[:max_results]
+        return _deduplicate_calls(calls)[:max_results]
 
     except Exception:
         return []
