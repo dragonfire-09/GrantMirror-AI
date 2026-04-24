@@ -26,8 +26,6 @@ from call_fetcher import (
     build_call_specific_criteria,
     CallCache,
     calls_to_excel_bytes,
-    fetch_all_calls,
-    clean_html,
 )
 from call_db import (
     keyword_match_calls, ai_match_calls, build_call_eval_context,
