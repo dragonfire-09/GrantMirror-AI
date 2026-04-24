@@ -388,6 +388,61 @@ def inject_modern_css():
     margin-top: 4px;
 }
 
+.gm-top-hero {
+    background: linear-gradient(135deg, #101828 0%, #26335f 48%, #175cd3 100%);
+    border-radius: 30px;
+    padding: 42px;
+    color: #ffffff;
+    box-shadow: 0 26px 70px rgba(16,24,40,0.18);
+    margin-bottom: 32px;
+}
+
+.gm-top-hero h1 {
+    color: #ffffff !important;
+    font-size: 3rem;
+    margin-bottom: 10px;
+}
+
+.gm-top-hero p {
+    color: #d0d5dd !important;
+    font-size: 1rem;
+}
+
+.gm-hero-badges {
+    display: flex;
+    gap: 10px;
+    flex-wrap: wrap;
+    margin-top: 22px;
+}
+
+.gm-hero-badge {
+    background: rgba(255,255,255,0.12);
+    border: 1px solid rgba(255,255,255,0.18);
+    color: #ffffff;
+    border-radius: 999px;
+    padding: 8px 13px;
+    font-weight: 700;
+    font-size: 0.82rem;
+}
+
+.gm-upload-card {
+    background: #ffffff;
+    border: 1px solid #eaecf0;
+    border-radius: 28px;
+    padding: 30px;
+    box-shadow: 0 18px 46px rgba(16,24,40,0.08);
+    margin-bottom: 28px;
+}
+
+.gm-upload-card h2 {
+    margin-top: 0;
+    margin-bottom: 6px;
+}
+
+.gm-upload-subtitle {
+    color: #667085;
+    margin-bottom: 18px;
+}
         
 
         /* ─────────────────────────────
