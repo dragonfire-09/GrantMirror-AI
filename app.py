@@ -1458,8 +1458,8 @@ def render_evaluation_page():
     )
 
     if not uploaded:
-    render_feature_dashboard()
-    return
+        render_feature_dashboard()
+        return
 
     fb, fn = uploaded.read(), uploaded.name
     with st.spinner("📄 Belge okunuyor..."):
