@@ -1734,24 +1734,15 @@ def main():
     with st.sidebar:
         st.divider()
 
-    if page == "🔬 Değerlendirme":
-        render_evaluation_page()
-
-    elif page == "📡 Canlı Çağrılar":
-        render_calls_page()
-
-    elif page == "📰 Haberler":
-        render_news_page()
-    
-    with st.sidebar:
-        st.divider()
         cached_stats = st.session_state.get("last_fetch_stats", None)
+
         if cached_stats:
             t = cached_stats.get("total", 0)
             ec = cached_stats.get("ec_api", 0)
             eur = cached_stats.get("euresearch", 0)
             ua = cached_stats.get("ufukavrupa", 0)
             db = cached_stats.get("local_db", 0)
+
             st.caption(
                 f"📊 Toplam: {t} | EC:{ec} EUR:{eur} UA:{ua} DB:{db}"
             )
@@ -1764,8 +1755,10 @@ def main():
 
     if page == "📡 Canlı Çağrılar":
         render_calls_page()
+
     elif page == "📰 Haberler":
         render_news_page()
+
     else:
         render_evaluation_page()
 
