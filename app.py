@@ -1482,7 +1482,7 @@ if not uploaded:
    render_feature_dashboard()
    return
 
-    fb, fn = uploaded.read(), uploaded.name
+fb, fn = uploaded.read(), uploaded.name
     with st.spinner("📄 Belge okunuyor..."):
         try:
             proposal = parse_proposal(fb, fn)
