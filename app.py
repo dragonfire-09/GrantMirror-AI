@@ -1708,6 +1708,7 @@ def render_evaluation_page():
 # MAIN
 # ═══════════════════════════════════════════════════════════
 def main():
+    inject_modern_css()  
     render_header()
     page = st.sidebar.radio(
         "📌",
