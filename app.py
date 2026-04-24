@@ -1754,11 +1754,11 @@ def main():
             )
 
     if page == "📡 Canlı Çağrılar":
-    try:
-        render_calls_page()
-    except Exception as e:
-        st.error("Canlı Çağrılar sayfasında hata var.")
-        st.exception(e)
+        try:
+            render_calls_page()
+        except Exception as e:
+            st.error("Canlı Çağrılar sayfasında hata var.")
+            st.exception(e)
 
     elif page == "📰 Haberler":
         render_news_page()
