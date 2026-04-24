@@ -1723,9 +1723,9 @@ page = st.sidebar.radio(
     pages,
     index=pages.index(default_page) if default_page in pages else 0,
     label_visibility="collapsed",
-)
+   )
 
-st.session_state["nav"] = page
+   st.session_state["nav"] = page
     
     with st.sidebar:
         st.divider()
