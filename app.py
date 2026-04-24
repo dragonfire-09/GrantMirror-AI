@@ -736,8 +736,8 @@ def render_call_dashboard():
     )
     cached = st.session_state.call_cache.get(cache_key)
 
-    if cached:
-        calls, src_stats = cached
+   if cached:
+    calls, src_stats = cached
 else:
     with st.spinner("📡 Çağrılar çekiliyor..."):
         calls, total = fetch_horizon_calls(
@@ -746,6 +746,11 @@ else:
             programme="HORIZON",
             page_size=max_results,
         )
+
+        src_stats = {
+            "success": True,
+            "total_calls": total,
+        }
 
         src_stats = {
             "success": True,
