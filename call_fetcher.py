@@ -186,7 +186,7 @@ def fetch_horizon_calls(
 ) -> Tuple[List[Dict], Dict]:
 
     selected_status = status_filter or status
-    max_results = int(max_api_results or page_size or 100)
+    max_results = int(page_size or max_api_results or 100)
     max_results = min(max_results, 500)
 
     all_calls = []
