@@ -287,3 +287,27 @@ WEAKNESS_TAXONOMY = {
     "TRL_INCONSISTENCY": {"label": "TRL Inconsistency", "description": "TRL entry/exit unclear"},
     "PARTNER_ROLE_UNCLEAR": {"label": "Unclear Partner Roles", "description": "Partner involvement not justified"},
 }
+
+# ═══════════════════════════════════════════════════════════
+# DYNAMIC CRITERIA MAPPING (call_fetcher uses this)
+# ═══════════════════════════════════════════════════════════
+ACTION_TYPE_NAME_MAP = {
+    "RIA": ActionType.RIA,
+    "IA": ActionType.IA,
+    "CSA": ActionType.CSA,
+    "MSCA-DN": ActionType.MSCA_DN,
+    "EIC-Pathfinder-Open": ActionType.EIC_PATHFINDER_OPEN,
+    "EIC-Accelerator": ActionType.EIC_ACCELERATOR,
+    "ERC-StG": ActionType.ERC_STG,
+}
+
+
+def get_action_type_from_string(s: str) -> ActionType:
+    """Map string action type to ActionType enum."""
+    if s in ACTION_TYPE_NAME_MAP:
+        return ACTION_TYPE_NAME_MAP[s]
+    upper = s.upper()
+    for key, val in ACTION_TYPE_NAME_MAP.items():
+        if key.upper() in upper or upper in key.upper():
+            return val
+    return ActionType.RIA  # fallback
