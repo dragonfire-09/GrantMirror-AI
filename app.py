@@ -1480,7 +1480,7 @@ uploaded = st.file_uploader(
 
 if not uploaded:
     render_feature_dashboard()
-    return
+             return
 
     fb, fn = uploaded.read(), uploaded.name
     with st.spinner("📄 Belge okunuyor..."):
