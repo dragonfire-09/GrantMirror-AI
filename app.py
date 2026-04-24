@@ -1336,50 +1336,53 @@ def render_news_page():
 # ═══════════════════════════════════════════════════════════
 def render_feature_dashboard():
     st.markdown("## 🎯 GrantMirror-AI Ne Yapar?")
+    st.caption("Horizon Europe tekliflerini çağrı uyumu, hakem değerlendirmesi ve fonlanma olasılığı açısından analiz eder.")
 
     features = [
-        ("📡", "Canlı Çağrı", "EC API üzerinden güncel Horizon çağrılarını çeker.", "Live Data", "📡 Canlı Çağrılar"),
-        ("🎯", "AI Eşleştirme", "Proje fikrini en uygun çağrılarla eşleştirir.", "Matching", "📡 Canlı Çağrılar"),
-        ("🧠", "RAG Motor", "Kriter bazlı bilgi analizi yapar.", "Knowledge", "🔬 Değerlendirme"),
-        ("📋", "ESR Simülasyon", "Hakem değerlendirmesi üretir.", "Evaluator", "🔬 Değerlendirme"),
-        ("🛠️", "Koçluk", "Somut iyileştirme önerileri verir.", "Coaching", "🔬 Değerlendirme"),
-        ("📊", "Güven Aralığı", "Fonlanma olasılığı hesaplar.", "Prediction", "🔬 Değerlendirme"),
-        ("🔒", "Kimlik Taraması", "Kör değerlendirme kontrolü yapar.", "Blind", "🔬 Değerlendirme"),
-        ("📰", "Canlı Haberler", "Güncel EU ve UfukAvrupa haberlerini izler.", "News", "📰 Haberler"),
+        ("📡", "Canlı Çağrı", "EC API üzerinden güncel Horizon çağrılarını çeker.", "📡 Canlı Çağrılar"),
+        ("🎯", "AI Eşleştirme", "Proje fikrini en uygun çağrılarla eşleştirir.", "📡 Canlı Çağrılar"),
+        ("🧠", "RAG Motor", "Kriter ve rehber bilgisini birlikte yorumlar.", "🔬 Değerlendirme"),
+        ("📋", "ESR Simülasyon", "Hakem formatına yakın değerlendirme üretir.", "🔬 Değerlendirme"),
+        ("🛠️", "Koçluk", "Zayıf noktalar için düzeltme önerileri verir.", "🔬 Değerlendirme"),
+        ("📊", "Güven Aralığı", "Puan ve fonlanma olasılığı tahmini üretir.", "🔬 Değerlendirme"),
+        ("🔒", "Kimlik Taraması", "Kör değerlendirme risklerini kontrol eder.", "🔬 Değerlendirme"),
+        ("📰", "Canlı Haberler", "EU ve UfukAvrupa haberlerini izler.", "📰 Haberler"),
     ]
 
-    html = '<div style="display:grid;grid-template-columns:repeat(4,1fr);gap:18px;margin-top:22px;margin-bottom:14px;">'
+    rows = [features[:4], features[4:]]
 
-    for i, (icon, title, desc, tag, target) in enumerate(features):
-        html += f'''
-<div class="gm-feature-card-pro">
-  <div class="gm-feature-shine"></div>
-  <div class="gm-feature-head">
-    <div class="gm-feature-icon-pro">{icon}</div>
-    <div class="gm-feature-tag-pro">{tag}</div>
-  </div>
-  <div class="gm-feature-title-pro">{title}</div>
-  <div class="gm-feature-desc-pro">{desc}</div>
-</div>
-'''
+    for row in rows:
+        cols = st.columns(4)
 
-    html += "</div>"
-    st.markdown(html, unsafe_allow_html=True)
+        for col, (icon, title, desc, target_page) in zip(cols, row):
+            with col:
+                with st.container(border=True):
+                    st.markdown(f"### {icon} {title}")
+                    st.write(desc)
 
-    st.markdown("#### Hızlı geçiş")
-    nav_cols = st.columns(3)
+                    if st.button(
+                        f"{title} aç",
+                        key=f"open_{title}",
+                        use_container_width=True,
+                    ):
+                        st.session_state["nav"] = target_page
+                        st.rerun()
 
-    with nav_cols[0]:
+    st.divider()
+
+    c1, c2, c3 = st.columns(3)
+
+    with c1:
         if st.button("📡 Canlı Çağrılara Git", use_container_width=True):
             st.session_state["nav"] = "📡 Canlı Çağrılar"
             st.rerun()
 
-    with nav_cols[1]:
+    with c2:
         if st.button("🔬 Değerlendirme Modu", use_container_width=True):
             st.session_state["nav"] = "🔬 Değerlendirme"
             st.rerun()
 
-    with nav_cols[2]:
+    with c3:
         if st.button("📰 Haberleri Aç", use_container_width=True):
             st.session_state["nav"] = "📰 Haberler"
             st.rerun()
