@@ -5,8 +5,6 @@ def inject_modern_css():
     st.markdown(
         """
         <style>
-
-        /* Background */
         .main {
             background: #f7f8fb;
         }
@@ -15,19 +13,16 @@ def inject_modern_css():
             color: #101828;
         }
 
-        /* Sidebar */
         [data-testid="stSidebar"] {
             background: linear-gradient(180deg, #2b2d6e 0%, #1f2154 100%);
         }
 
-        /* Sidebar text */
         [data-testid="stSidebar"] label,
         [data-testid="stSidebar"] p,
         [data-testid="stSidebar"] span {
             color: #f8fafc !important;
         }
 
-        /* 🔥 SELECTBOX FIX (ANA PROBLEM) */
         [data-testid="stSidebar"] [data-baseweb="select"] > div {
             background-color: #ffffff !important;
             color: #101828 !important;
@@ -35,42 +30,31 @@ def inject_modern_css():
             border: none !important;
         }
 
-        /* Selected text */
         [data-testid="stSidebar"] [data-baseweb="select"] span {
             color: #101828 !important;
             font-weight: 600 !important;
         }
 
-        /* Dropdown arrow */
         [data-testid="stSidebar"] [data-baseweb="select"] svg {
             fill: #101828 !important;
+            color: #101828 !important;
         }
 
-        /* Dropdown menu (açılınca) */
         div[data-baseweb="popover"] {
             background-color: #ffffff !important;
             border-radius: 12px !important;
         }
 
-        div[data-baseweb="popover"] li {
+        div[data-baseweb="popover"] li,
+        div[data-baseweb="popover"] div {
             color: #101828 !important;
-            font-weight: 500;
+            font-weight: 500 !important;
         }
 
-        /* Hover */
         div[data-baseweb="popover"] li:hover {
             background-color: #eef2ff !important;
         }
 
-        /* Buttons */
-        button {
-            border-radius: 10px !important;
-        }
-
-        </style>
-        """,
-        unsafe_allow_html=True
-    )
         .gm-hero {
             background: linear-gradient(135deg, #101828 0%, #344054 45%, #175cd3 100%);
             padding: 2.4rem;
@@ -137,13 +121,8 @@ def inject_modern_css():
         }
 
         .stButton > button {
-            border-radius: 12px;
-            font-weight: 700;
-        }
-
-        [data-testid="stSidebar"] {
-            background: #ffffff;
-            border-right: 1px solid #eaecf0;
+            border-radius: 12px !important;
+            font-weight: 700 !important;
         }
         </style>
         """,
