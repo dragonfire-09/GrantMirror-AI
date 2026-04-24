@@ -902,8 +902,8 @@ def render_call_dashboard():
             mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
             use_container_width=True,
         )
-
-    # ─── AI CALL MATCHING ───
+        
+        # ─── AI CALL MATCHING ───
 st.markdown("### 🤖 AI ile En Uygun Çağrıları Bul")
 
 proposal_for_ranking = st.text_area(
@@ -917,21 +917,18 @@ if st.button("🎯 En Uygun Çağrıları Bul", use_container_width=True):
     if not proposal_for_ranking.strip():
         st.warning("Önce proje özeti gir")
     else:
-        selected_call = None
-
         with st.spinner("AI analiz yapıyor..."):
 
             ranked_calls = rank_calls_with_ai(
                 proposal_text=proposal_for_ranking,
                 calls=calls,
-                llm_call=self._call_llm if hasattr(self, "_call_llm") else None,
+                llm_call=evaluator._call_llm,
                 top_k=10,
             )
 
         st.session_state["ranked_calls"] = ranked_calls
 
 
-# ─── SONUÇ GÖSTER ───
 ranked_calls = st.session_state.get("ranked_calls", [])
 
 if ranked_calls:
@@ -956,9 +953,7 @@ if ranked_calls:
                     {call.get('call_id', '')}
                 </div>
 
-                <div style="margin-top:4px;">
-                    {call.get('title', '')}
-                </div>
+                <div>{call.get('title', '')}</div>
 
                 <div style="font-size:0.85rem;color:#667085;margin-top:6px;">
                     📅 {call.get('deadline', '')} · 🛰️ {call.get('source', '')}
