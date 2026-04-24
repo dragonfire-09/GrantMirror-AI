@@ -1354,45 +1354,35 @@ def render_feature_dashboard():
     st.markdown("## 🎯 GrantMirror-AI Ne Yapar?")
 
     features = [
-        ("📡", "Canlı Çağrı", "EC API + Euresearch + UfukAvrupa"),
-        ("🎯", "AI Eşleştirme", "En uygun çağrılarla eşleştirir"),
-        ("🧠", "RAG Motor", "Kriter bazlı AI bilgi sentezi"),
-        ("📋", "ESR Simülasyon", "Gerçek hakem formatı"),
-        ("🎯", "Koçluk", "Somut düzeltme önerileri"),
-        ("📊", "Güven Aralığı", "Puan + fonlanma olasılığı"),
-        ("🔒", "Kimlik Taraması", "Kör değerlendirme kontrolü"),
-        ("📰", "Canlı Haberler", "RSS + Scraper + EC API"),
+        ("📡", "Canlı Çağrı", "Güncel Horizon çağrılarını EC API ve diğer kaynaklardan çeker.", "Canlı Veri"),
+        ("🎯", "AI Eşleştirme", "Proje fikrini en uygun çağrılarla eşleştirir.", "Matching"),
+        ("🧠", "RAG Motor", "Kriter, çağrı ve rehber bilgisini birlikte yorumlar.", "Knowledge"),
+        ("📋", "ESR Simülasyon", "Hakem formatına yakın değerlendirme raporu üretir.", "Evaluator"),
+        ("🛠️", "Koçluk", "Zayıf noktalar için somut düzeltme önerileri sunar.", "Coaching"),
+        ("📊", "Güven Aralığı", "Puan tahmini ve fonlanma olasılığı verir.", "Prediction"),
+        ("🔒", "Kimlik Taraması", "Kör değerlendirmeyi bozabilecek sinyalleri tespit eder.", "Blind Review"),
+        ("📰", "Canlı Haberler", "RSS ve scraper kaynaklarıyla Horizon haberlerini izler.", "News"),
     ]
 
-    cols = st.columns(4)
+    html = """
+    <div class="gm-feature-grid">
+    """
 
-    for i, (icon, title, desc) in enumerate(features):
-        with cols[i % 4]:
-            if st.button(
-                f"{icon} {title}",
-                key=f"feat_{i}",
-                use_container_width=True,
-            ):
-                if title in ["Canlı Çağrı", "AI Eşleştirme"]:
-                    st.session_state["nav"] = "📡 Canlı Çağrılar"
-                elif title == "Canlı Haberler":
-                    st.session_state["nav"] = "📰 Haberler"
-                else:
-                    st.session_state["nav"] = "🔬 Değerlendirme"
+    for icon, title, desc, tag in features:
+        html += f"""
+        <div class="gm-feature-card">
+            <div class="gm-feature-top">
+                <div class="gm-feature-icon">{icon}</div>
+                <div class="gm-feature-tag">{tag}</div>
+            </div>
+            <div class="gm-feature-title">{title}</div>
+            <div class="gm-feature-desc">{desc}</div>
+        </div>
+        """
 
-                st.rerun()
+    html += "</div>"
 
-            st.markdown(
-                f"""
-                <div class="gm-feature-card">
-                    <div class="gm-feature-icon">{icon}</div>
-                    <div class="gm-feature-title">{title}</div>
-                    <div class="gm-feature-desc">{desc}</div>
-                </div>
-                """,
-                unsafe_allow_html=True,
-            )
-
+    st.markdown(html, unsafe_allow_html=True)
 
 def render_evaluation_page():
     with st.sidebar:
