@@ -299,8 +299,40 @@ def _fetch_ec_calls(
                 continue
 
             data = response.json()
-            results = data.get("results", [])
-            total_results = data.get("totalResults", len(results))
+            all_results = []
+            total_results = 0
+
+max_pages = max(1, int(page_size / 100))
+
+for page_num in range(1, max_pages + 1):
+    params["pageNumber"] = str(page_num)
+
+    response = requests.get(
+        EC_API_URL,
+        params=params,
+        timeout=30,
+        headers={
+            "Accept": "application/json",
+            "User-Agent": "GrantMirror-AI/1.0",
+        },
+    )
+
+    if response.status_code != 200:
+        continue
+
+    data = response.json()
+    results = data.get("results", [])
+
+    if page_num == 1:
+        total_results = data.get("totalResults", len(results))
+
+    if not results:
+        break
+
+    all_results.extend(results)
+
+    if len(all_results) >= page_size:
+        break
 
             attempt["total_results"] = total_results
             attempt["page1_count"] = len(results)
