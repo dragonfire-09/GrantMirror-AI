@@ -1,6 +1,6 @@
 """
 news_fetcher.py — Horizon Europe Canlı Haber Çekici
-RSS + Web Scraper + EC API + UfukAvrupa
+RSS + Web Scraper + EC API + UfukAvrupa + Euresearch
 """
 import time
 import re
@@ -23,7 +23,7 @@ except ImportError:
 
 
 # ═══════════════════════════════════════════════════════════
-# RSS KAYNAKLARI — DOĞRULANMIŞ URL'LER
+# RSS KAYNAKLARI
 # ═══════════════════════════════════════════════════════════
 RSS_SOURCES = [
     {
@@ -31,7 +31,7 @@ RSS_SOURCES = [
         "url": "https://research-and-innovation.ec.europa.eu/node/2/rss_en",
         "icon": "🇪🇺",
         "category": "📋 Program Güncellemesi",
-        "horizon_filter": False,  # Zaten Horizon ile ilgili
+        "horizon_filter": False,
     },
     {
         "name": "EC R&I - Horizon Europe",
@@ -80,7 +80,6 @@ RSS_SOURCES = [
     },
 ]
 
-# Alternatif RSS URL'leri (birincil çalışmazsa)
 ALT_RSS_SOURCES = [
     {
         "name": "EC R&I Blog",
@@ -152,6 +151,7 @@ _news_cache = NewsCache(ttl_minutes=15)
 # HTML TEMİZLEYİCİ
 # ═══════════════════════════════════════════════════════════
 def _clean_html(text: str) -> str:
+    """HTML etiketlerini ve entity'leri temizle."""
     if not text:
         return ""
     if HAS_BS4:
@@ -177,6 +177,7 @@ def _clean_html(text: str) -> str:
 # TARİH PARSER
 # ═══════════════════════════════════════════════════════════
 def _parse_date(entry) -> str:
+    """RSS entry'den tarih çıkar."""
     for field in ("published_parsed", "updated_parsed"):
         tp = getattr(entry, field, None)
         if tp:
@@ -198,11 +199,12 @@ def _parse_date(entry) -> str:
                 "%Y-%m-%d",
             ):
                 try:
-                    return datetime.strptime(raw.strip()[:30], fmt).strftime("%Y-%m-%d")
+                    return datetime.strptime(
+                        raw.strip()[:30], fmt
+                    ).strftime("%Y-%m-%d")
                 except Exception:
                     continue
             if len(raw) >= 10:
-                # ISO format dene
                 try:
                     return raw[:10]
                 except Exception:
@@ -214,31 +216,51 @@ def _parse_date(entry) -> str:
 # KATEGORİ TESPİTİ
 # ═══════════════════════════════════════════════════════════
 def _is_horizon_related(title: str, summary: str) -> bool:
+    """Haberin Horizon Europe ile ilgili olup olmadığını kontrol et."""
     combined = (title + " " + summary).lower()
     return any(kw in combined for kw in HORIZON_KEYWORDS)
 
 
 def _detect_tag(title: str, summary: str, default_category: str) -> str:
+    """Haberin kategorisini otomatik belirle."""
     combined = (title + " " + summary).lower()
 
     tag_rules = [
-        (["call for proposals", "new call", "calls open", "çağrı açıldı",
-          "yeni çağrı", "open call"], "🆕 Yeni Çağrı"),
+        (
+            ["call for proposals", "new call", "calls open",
+             "çağrı açıldı", "yeni çağrı", "open call"],
+            "🆕 Yeni Çağrı",
+        ),
         (["erc", "european research council"], "⭐ ERC"),
         (["eic", "pathfinder", "accelerator"], "💡 EIC"),
-        (["msca", "marie sklodowska", "marie curie", "doctoral network"], "🎓 MSCA"),
-        (["mission", "cancer", "ocean", "climate adaptation",
-          "soil health", "climate-neutral"], "🌍 Missions"),
+        (
+            ["msca", "marie sklodowska", "marie curie", "doctoral network"],
+            "🎓 MSCA",
+        ),
+        (
+            ["mission", "cancer", "ocean", "climate adaptation",
+             "soil health", "climate-neutral"],
+            "🌍 Missions",
+        ),
         (["widening", "twinning", "teaming", "era"], "🤝 Widening"),
-        (["work programme", "update", "amendment", "güncelleme"], "📋 Program Güncellemesi"),
-        (["statistics", "success rate", "evaluation result", "istatistik"], "📊 İstatistik"),
+        (
+            ["work programme", "update", "amendment", "güncelleme"],
+            "📋 Program Güncellemesi",
+        ),
+        (
+            ["statistics", "success rate", "evaluation result", "istatistik"],
+            "📊 İstatistik",
+        ),
         (["guide", "guideline", "how to", "tip", "rehber"], "📝 Rehber"),
         (["cluster 4", "digital", "industry", "space"], "🔬 Cluster 4"),
         (["cluster 5", "climate", "energy", "mobility"], "🌿 Cluster 5"),
         (["cluster 1", "health"], "🏥 Cluster 1"),
         (["cluster 2", "culture", "creative", "society"], "🎭 Cluster 2"),
         (["cluster 3", "security", "civil"], "🛡️ Cluster 3"),
-        (["cluster 6", "food", "bioeconomy", "natural resources"], "🌾 Cluster 6"),
+        (
+            ["cluster 6", "food", "bioeconomy", "natural resources"],
+            "🌾 Cluster 6",
+        ),
         (["infrastructure", "research infrastructure"], "🏗️ Altyapı"),
     ]
 
@@ -252,7 +274,7 @@ def _detect_tag(title: str, summary: str, default_category: str) -> str:
 # ═══════════════════════════════════════════════════════════
 # RSS ÇEKME
 # ═══════════════════════════════════════════════════════════
-def _fetch_rss_feed(url: str, timeout: int = 15) -> Optional[object]:
+def _fetch_rss_feed(url: str, timeout: int = 15):
     """RSS feed'i çek — feedparser + requests fallback."""
     if not HAS_FEEDPARSER:
         return None
@@ -303,7 +325,6 @@ def fetch_rss_news(
     feed = _fetch_rss_feed(source["url"])
 
     if not feed or not feed.entries:
-        # Boş kaynak — hata bildirme
         _news_cache.set(cache_key, items)
         return items
 
@@ -327,7 +348,9 @@ def fetch_rss_news(
             summary = summary[:397] + "..."
 
         date_str = _parse_date(entry)
-        tag = _detect_tag(title, summary, source.get("category", "📰 Haber"))
+        tag = _detect_tag(
+            title, summary, source.get("category", "📰 Haber")
+        )
 
         item_id = hashlib.md5(
             (title + link).encode("utf-8")
@@ -365,7 +388,6 @@ def fetch_all_rss_news(
     seen_titles = set()
     working_sources = 0
 
-    # Ana kaynaklar
     for source in RSS_SOURCES:
         items = fetch_rss_news(source, max_per_source, horizon_only)
         if items:
@@ -376,7 +398,7 @@ def fetch_all_rss_news(
                 seen_titles.add(title_key)
                 all_items.append(item)
 
-    # Eğer az kaynak çalışıyorsa alternatifler dene
+    # Az kaynak çalışıyorsa alternatifler
     if working_sources < 2:
         for source in ALT_RSS_SOURCES:
             items = fetch_rss_news(source, max_per_source, horizon_only)
@@ -435,7 +457,6 @@ def fetch_ufukavrupa_news(max_items: int = 20) -> List[Dict]:
 
                 soup = BeautifulSoup(resp.text, "html.parser")
 
-                # Çeşitli container seçiciler
                 containers = (
                     soup.select(".view-content .views-row")
                     or soup.select("article")
@@ -446,15 +467,14 @@ def fetch_ufukavrupa_news(max_items: int = 20) -> List[Dict]:
                 )
 
                 if not containers:
-                    # Heading bazlı fallback
                     containers = []
                     for heading in soup.find_all(["h2", "h3", "h4"]):
                         parent = heading.parent
                         if parent:
                             containers.append(parent)
 
-                for item in containers[:max_items * 2]:
-                    news = _parse_ufukavrupa_news_item(item, url)
+                for item_el in containers[:max_items * 2]:
+                    news = _parse_ufukavrupa_news_item(item_el, url)
                     if news and news.get("title") and len(news["title"]) > 10:
                         items.append(news)
                     if len(items) >= max_items:
@@ -476,10 +496,13 @@ def fetch_ufukavrupa_news(max_items: int = 20) -> List[Dict]:
 def _parse_ufukavrupa_news_item(item, source_url: str) -> Optional[Dict]:
     """UfukAvrupa haber öğesini parse et."""
     try:
-        # Başlık bul
         title_el = (
-            item.select_one("h2 a, h3 a, h4 a, .title a, .field--name-title a")
-            or item.select_one("h2, h3, h4, .title, .field--name-title")
+            item.select_one(
+                "h2 a, h3 a, h4 a, .title a, .field--name-title a"
+            )
+            or item.select_one(
+                "h2, h3, h4, .title, .field--name-title"
+            )
         )
         if not title_el:
             return None
@@ -488,7 +511,6 @@ def _parse_ufukavrupa_news_item(item, source_url: str) -> Optional[Dict]:
         if not title or len(title) < 10:
             return None
 
-        # Link
         link = ""
         if title_el.name == "a":
             link = title_el.get("href", "")
@@ -499,7 +521,6 @@ def _parse_ufukavrupa_news_item(item, source_url: str) -> Optional[Dict]:
         if link and not link.startswith("http"):
             link = f"{UFUKAVRUPA_BASE}{link}"
 
-        # Tarih
         date_str = datetime.now().strftime("%Y-%m-%d")
         date_el = item.select_one(
             ".date, .field--name-created, time, "
@@ -507,22 +528,21 @@ def _parse_ufukavrupa_news_item(item, source_url: str) -> Optional[Dict]:
         )
         if date_el:
             raw_date = date_el.get_text(strip=True)
-            # Türkçe tarih formatları
-            date_match = re.search(r'(\d{1,2})[./](\d{1,2})[./](\d{4})', raw_date)
+            date_match = re.search(
+                r'(\d{1,2})[./](\d{1,2})[./](\d{4})', raw_date
+            )
             if date_match:
                 d, m, y = date_match.groups()
                 date_str = f"{y}-{m.zfill(2)}-{d.zfill(2)}"
             else:
                 date_match2 = re.search(r'(\d{4}-\d{2}-\d{2})', raw_date)
-                                if date_match2:
+                if date_match2:
                     date_str = date_match2.group(1)
                 else:
-                    # datetime attribute dene
                     dt_attr = date_el.get("datetime", "")
                     if dt_attr and len(dt_attr) >= 10:
                         date_str = dt_attr[:10]
 
-        # Özet
         summary = ""
         summary_el = item.select_one(
             ".summary, .body, .teaser, .description, "
@@ -561,7 +581,24 @@ def _parse_ufukavrupa_news_item(item, source_url: str) -> Optional[Dict]:
 EC_SEARCH_URL = "https://api.tech.ec.europa.eu/search-api/prod/rest/search"
 
 
-def fetch_recent_calls_as_news(days: int = 30, max_items: int = 10) -> List[Dict]:
+def _extract_meta_field(metadata: dict, field: str) -> str:
+    """EC API metadata'dan alan çıkar."""
+    for key, values in metadata.items():
+        if field.lower() in key.lower():
+            if isinstance(values, list) and values:
+                v = values[0]
+                if isinstance(v, dict):
+                    return str(v.get("value", ""))
+                return str(v)
+            elif isinstance(values, str):
+                return values
+    return ""
+
+
+def fetch_recent_calls_as_news(
+    days: int = 30,
+    max_items: int = 10,
+) -> List[Dict]:
     """EC API'den son N günde açılan çağrıları haber olarak getir."""
     cache_key = f"recent_calls_news_{days}_{max_items}"
     cached = _news_cache.get(cache_key)
@@ -570,7 +607,9 @@ def fetch_recent_calls_as_news(days: int = 30, max_items: int = 10) -> List[Dict
 
     items = []
     try:
-        since = (datetime.now() - timedelta(days=days)).strftime("%Y-%m-%d")
+        since = (
+            datetime.now() - timedelta(days=days)
+        ).strftime("%Y-%m-%d")
         params = {
             "apiKey": "SEDIA",
             "text": "*",
@@ -591,19 +630,19 @@ def fetch_recent_calls_as_news(days: int = 30, max_items: int = 10) -> List[Dict
             for r in results[:max_items]:
                 meta = r.get("metadata", {})
 
-                title = _extract_meta_field(meta, "title")
-                call_id = _extract_meta_field(meta, "identifier")
-                deadline = _extract_meta_field(meta, "deadlineDate")
-                status = _extract_meta_field(meta, "status")
-                start_date = _extract_meta_field(meta, "startDate")
-
-                title = _clean_html(title)
-                call_id = _clean_html(call_id)
+                title = _clean_html(_extract_meta_field(meta, "title"))
+                call_id = _clean_html(_extract_meta_field(meta, "identifier"))
+                deadline = _clean_html(
+                    _extract_meta_field(meta, "deadlineDate")
+                )
+                status = _clean_html(_extract_meta_field(meta, "status"))
+                start_date = _clean_html(
+                    _extract_meta_field(meta, "startDate")
+                )
 
                 if not title:
                     continue
 
-                # Son N gün içinde mi kontrol
                 if start_date and len(start_date) >= 10:
                     if start_date[:10] < since:
                         continue
@@ -620,12 +659,14 @@ def fetch_recent_calls_as_news(days: int = 30, max_items: int = 10) -> List[Dict
                 if call_id:
                     summary_parts.append(f"Çağrı ID: {call_id}")
                 if deadline:
-                    summary_parts.append(f"Son tarih: {_clean_html(deadline)[:10]}")
+                    summary_parts.append(f"Son tarih: {deadline[:10]}")
                 if status:
-                    summary_parts.append(f"Durum: {_clean_html(status)}")
+                    summary_parts.append(f"Durum: {status}")
                 summary = " | ".join(summary_parts)
 
-                display_title = f"{call_id}: {title}" if call_id else title
+                display_title = (
+                    f"{call_id}: {title}" if call_id else title
+                )
 
                 items.append({
                     "id": hashlib.md5(
@@ -649,20 +690,6 @@ def fetch_recent_calls_as_news(days: int = 30, max_items: int = 10) -> List[Dict
 
     _news_cache.set(cache_key, items)
     return items
-
-
-def _extract_meta_field(metadata: dict, field: str) -> str:
-    """EC API metadata'dan alan çıkar."""
-    for key, values in metadata.items():
-        if field.lower() in key.lower():
-            if isinstance(values, list) and values:
-                v = values[0]
-                if isinstance(v, dict):
-                    return str(v.get("value", ""))
-                return str(v)
-            elif isinstance(values, str):
-                return values
-    return ""
 
 
 # ═══════════════════════════════════════════════════════════
@@ -712,19 +739,25 @@ def fetch_euresearch_news(max_items: int = 15) -> List[Dict]:
                 )
 
                 if not containers:
-                    # Link bazlı fallback
                     for a in soup.find_all("a", href=True):
                         text = a.get_text(strip=True)
                         href = a.get("href", "")
                         if len(text) >= 20 and any(
                             kw in (text + href).lower()
-                            for kw in ["news", "event", "call", "horizon"]
+                            for kw in [
+                                "news", "event", "call", "horizon",
+                            ]
                         ):
-                            containers.append(a.parent or a)
+                            parent = a.parent if a.parent else a
+                            containers.append(parent)
 
                 for container in containers[:max_items]:
                     news = _parse_euresearch_news_item(container)
-                    if news and news.get("title") and len(news["title"]) > 10:
+                    if (
+                        news
+                        and news.get("title")
+                        and len(news["title"]) > 10
+                    ):
                         items.append(news)
                     if len(items) >= max_items:
                         break
@@ -865,7 +898,10 @@ FALLBACK_NEWS = [
             "Çığır açan teknolojiler için €3-4M bütçeli Pathfinder Open "
             "çağrısı açıldı. Son başvuru: 12 Mart 2025."
         ),
-        "link": "https://eic.ec.europa.eu/eic-funding-opportunities/eic-pathfinder_en",
+        "link": (
+            "https://eic.ec.europa.eu/eic-funding-opportunities/"
+            "eic-pathfinder_en"
+        ),
         "source": "Statik",
         "source_icon": "📌",
     },
@@ -927,7 +963,8 @@ FALLBACK_NEWS = [
         "link": (
             "https://research-and-innovation.ec.europa.eu/funding/"
             "funding-opportunities/funding-programmes-and-open-calls/"
-            "horizon-europe/widening-participation-and-spreading-excellence_en"
+            "horizon-europe/widening-participation-and-spreading-"
+            "excellence_en"
         ),
         "source": "Statik",
         "source_icon": "📌",
@@ -948,54 +985,49 @@ def get_news_with_fallback(
     """RSS + Scraper + EC API + Fallback ile haber getir."""
     cache_key = (
         f"all_news_{max_per_source}_{horizon_only}_"
-        f"{include_recent_calls}_{include_ufukavrupa}_{include_euresearch}"
+        f"{include_recent_calls}_{include_ufukavrupa}_"
+        f"{include_euresearch}"
     )
     cached = _news_cache.get(cache_key)
     if cached is not None:
         return cached
 
     all_news = []
-    source_counts = {}
 
     # 1. RSS haberleri
     try:
         rss_news = fetch_all_rss_news(max_per_source, horizon_only)
         all_news.extend(rss_news)
-        source_counts["RSS"] = len(rss_news)
     except Exception:
-        source_counts["RSS"] = 0
+        pass
 
     # 2. UfukAvrupa haberleri
     if include_ufukavrupa:
         try:
             ua_news = fetch_ufukavrupa_news(max_per_source)
             all_news.extend(ua_news)
-            source_counts["UfukAvrupa"] = len(ua_news)
         except Exception:
-            source_counts["UfukAvrupa"] = 0
+            pass
 
     # 3. Euresearch haberleri
     if include_euresearch:
         try:
             eur_news = fetch_euresearch_news(max_per_source)
             all_news.extend(eur_news)
-            source_counts["Euresearch"] = len(eur_news)
         except Exception:
-            source_counts["Euresearch"] = 0
+            pass
 
     # 4. Son açılan çağrılar (haber olarak)
     if include_recent_calls:
         try:
             call_news = fetch_recent_calls_as_news(days=30, max_items=10)
             all_news.extend(call_news)
-            source_counts["EC Calls"] = len(call_news)
         except Exception:
-            source_counts["EC Calls"] = 0
+            pass
 
     # 5. Hiç haber yoksa fallback
     if not all_news:
         all_news = FALLBACK_NEWS.copy()
-        source_counts["Fallback"] = len(all_news)
 
     # Deduplicate
     seen = set()
@@ -1024,16 +1056,17 @@ def get_news_sources_status() -> List[Dict]:
     for source in RSS_SOURCES:
         try:
             feed = _fetch_rss_feed(source["url"])
-            ok = feed is not None and bool(feed.entries)
+            ok = feed is not None and bool(getattr(feed, 'entries', []))
+            count = len(feed.entries) if ok else 0
             statuses.append({
                 "name": source["name"],
                 "icon": source.get("icon", "📰"),
                 "url": source["url"],
                 "status": "✅" if ok else "⚠️",
-                "count": len(feed.entries) if ok else 0,
+                "count": count,
                 "type": "RSS",
             })
-        except Exception as e:
+        except Exception:
             statuses.append({
                 "name": source["name"],
                 "icon": source.get("icon", "📰"),
@@ -1041,15 +1074,11 @@ def get_news_sources_status() -> List[Dict]:
                 "status": "❌",
                 "count": 0,
                 "type": "RSS",
-                "error": str(e)[:100],
             })
 
     # UfukAvrupa
     try:
-        headers = {
-            "User-Agent": "GrantMirror-AI/1.0",
-            "Accept": "text/html",
-        }
+        headers = {"User-Agent": "GrantMirror-AI/1.0", "Accept": "text/html"}
         resp = requests.get(
             UFUKAVRUPA_NEWS_URL, headers=headers, timeout=10,
         )
@@ -1058,7 +1087,7 @@ def get_news_sources_status() -> List[Dict]:
             "icon": "🇹🇷",
             "url": UFUKAVRUPA_NEWS_URL,
             "status": "✅" if resp.status_code == 200 else "⚠️",
-            "count": -1,  # Bilinmiyor
+            "count": -1,
             "type": "Scraper",
         })
     except Exception:
@@ -1073,10 +1102,7 @@ def get_news_sources_status() -> List[Dict]:
 
     # Euresearch
     try:
-        headers = {
-            "User-Agent": "GrantMirror-AI/1.0",
-            "Accept": "text/html",
-        }
+        headers = {"User-Agent": "GrantMirror-AI/1.0", "Accept": "text/html"}
         resp = requests.get(
             "https://www.euresearch.ch/en/news",
             headers=headers, timeout=10,
