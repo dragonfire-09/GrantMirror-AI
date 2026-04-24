@@ -607,20 +607,41 @@ def main():
             co = results["coaching"][i] if i < len(results["coaching"]) else {}
             render_criterion(cd, co, show_coach)
 
-    # Downloads
+        # Downloads
     st.markdown("---")
     st.markdown("## 📥 İndir")
     d1, d2, d3 = st.columns(3)
-    with d1:
-        st.download_button("📊 JSON", json.dumps(results, indent=2, ensure_ascii=False),
-                           f"grantmirror_{filename}.json", "application/json", use_container_width=True)
-    with d2:
-        st.download_button("📋 ESR (MD)", generate_esr_report(results, elig),
-                           f"grantmirror_{filename}_esr.md", "text/markdown", use_container_width=True)
-    with d3:
-        st.download_button("🎯 Koçluk (MD)", generate_coaching_report(results),
-                           f"grantmirror_{filename}_coach.md", "text/markdown", use_container_width=True)
 
+    # Eligibility results'ı dict listesine çevir (report_generator dış bağımlılık almıyor)
+    elig_dicts = [
+        {"check_name": ch.check_name, "status": ch.status.value, "message": ch.message}
+        for ch in elig.results
+    ]
+
+    with d1:
+        st.download_button(
+            "📊 JSON",
+            json.dumps(results, indent=2, ensure_ascii=False),
+            f"grantmirror_{filename}.json",
+            "application/json",
+            use_container_width=True,
+        )
+    with d2:
+        st.download_button(
+            "📋 ESR (MD)",
+            generate_esr_report(results, elig_dicts),
+            f"grantmirror_{filename}_esr.md",
+            "text/markdown",
+            use_container_width=True,
+        )
+    with d3:
+        st.download_button(
+            "🎯 Koçluk (MD)",
+            generate_coaching_report(results),
+            f"grantmirror_{filename}_coach.md",
+            "text/markdown",
+            use_container_width=True,
+        )
 
 if __name__ == "__main__":
     main()
