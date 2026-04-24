@@ -2,7 +2,7 @@ import streamlit as st
 import pandas as pd
 import plotly.graph_objects as go
 
-from document_parser import extract_text
+from document_parser import parse_proposal
 from evaluator import evaluate_proposal
 
 
