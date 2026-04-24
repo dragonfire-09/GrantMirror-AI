@@ -1727,38 +1727,60 @@ unsafe_allow_html=True,
                 show_coach,
             )
 
-    st.markdown("## 📥 Raporları İndir")
-    d1, d2, d3 = st.columns(3)
-    ed = [
-        {
-            "check_name": ch.check_name,
-            "status": ch.status.value,
-            "message": ch.message,
-        }
-        for ch in elig.results
-    ]
-    with d1:
-        st.download_button(
-            "📊 JSON",
-            json.dumps(results, indent=2, ensure_ascii=False),
-            f"gm_{fn}.json", "application/json",
-            use_container_width=True,
-        )
-    with d2:
-        st.download_button(
-            "📋 ESR",
-            generate_esr_report(results, ed),
-            f"gm_{fn}_esr.md", "text/markdown",
-            use_container_width=True,
-        )
-    with d3:
-        st.download_button(
-            "🎯 Koçluk",
-            generate_coaching_report(results),
-            f"gm_{fn}_coach.md", "text/markdown",
-            use_container_width=True,
-        )
+st.markdown("## 📥 Raporları İndir")
+# 
+d1, d2, d3, d4 = st.columns(4)
 
+ed = [
+    {
+        "check_name": ch.check_name,
+        "status": ch.status.value,
+        "message": ch.message,
+    }
+    for ch in elig.results
+]
+
+# 👇 raporları önce üret (çok önemli)
+esr_md = generate_esr_report(results, ed)
+coach_md = generate_coaching_report(results)
+esr_pdf = markdown_to_pdf_bytes(esr_md)
+
+with d1:
+    st.download_button(
+        "📊 JSON",
+        json.dumps(results, indent=2, ensure_ascii=False),
+        f"gm_{fn}.json",
+        "application/json",
+        use_container_width=True,
+    )
+
+with d2:
+    st.download_button(
+        "📄 ESR PDF",
+        esr_pdf,
+        f"gm_{fn}_esr.pdf",
+        "application/pdf",
+        use_container_width=True,
+    )
+
+with d3:
+    st.download_button(
+        "📋 ESR MD",
+        esr_md,
+        f"gm_{fn}_esr.md",
+        "text/markdown",
+        use_container_width=True,
+    )
+
+with d4:
+    st.download_button(
+        "🎯 Koçluk",
+        coach_md,
+        f"gm_{fn}_coach.md",
+        "text/markdown",
+        use_container_width=True,
+    )
+    
     with st.expander("🔧 DEBUG"):
         dc1, dc2, dc3 = st.columns(3)
         with dc1:
