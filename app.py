@@ -1,6 +1,7 @@
 """
 GrantMirror-AI: Horizon Europe Proposal Pre-Screening & ESR Simulator
 AI-powered call matching, RAG knowledge engine, section-aware scoring.
+Modern dashboard UI with glassmorphism design.
 """
 import streamlit as st
 import json
@@ -20,8 +21,12 @@ from knowledge_base import HorizonKnowledgeBase
 from deidentifier import scan_for_identity_signals, generate_deidentification_report
 from report_generator import generate_esr_report, generate_coaching_report
 from call_fetcher import (
-    fetch_horizon_calls, fetch_topic_details,
-    detect_action_type_from_call, build_call_specific_criteria, CallCache,
+    fetch_horizon_calls,
+    fetch_topic_details,
+    detect_action_type_from_call,
+    build_call_specific_criteria,
+    CallCache,
+    calls_to_excel_bytes,
 )
 from call_db import keyword_match_calls, ai_match_calls, build_call_eval_context, HORIZON_CALLS_DB
 from rag_engine import get_criterion_context as rag_get_context, ai_enhanced_retrieval
@@ -35,6 +40,583 @@ st.set_page_config(
     layout="wide",
     initial_sidebar_state="expanded",
 )
+
+# ═══════════════════════════════════════════════════════════
+# MODERN CSS THEME
+# ═══════════════════════════════════════════════════════════
+st.markdown("""
+<style>
+/* ── Google Font ── */
+@import url('https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700;800;900&display=swap');
+
+/* ── Root Variables ── */
+:root {
+    --gm-primary: #6366f1;
+    --gm-primary-light: #818cf8;
+    --gm-primary-dark: #4f46e5;
+    --gm-secondary: #06b6d4;
+    --gm-success: #10b981;
+    --gm-warning: #f59e0b;
+    --gm-danger: #ef4444;
+    --gm-bg: #f8fafc;
+    --gm-surface: #ffffff;
+    --gm-surface-hover: #f1f5f9;
+    --gm-border: #e2e8f0;
+    --gm-text: #1e293b;
+    --gm-text-secondary: #64748b;
+    --gm-text-muted: #94a3b8;
+    --gm-radius: 16px;
+    --gm-radius-sm: 10px;
+    --gm-radius-xs: 6px;
+    --gm-shadow: 0 1px 3px rgba(0,0,0,0.04), 0 4px 12px rgba(0,0,0,0.06);
+    --gm-shadow-lg: 0 4px 6px rgba(0,0,0,0.04), 0 10px 24px rgba(0,0,0,0.08);
+    --gm-shadow-xl: 0 8px 30px rgba(0,0,0,0.12);
+    --gm-transition: all 0.2s cubic-bezier(0.4, 0, 0.2, 1);
+}
+
+/* ── Global ── */
+html, body, [class*="css"] {
+    font-family: 'Inter', -apple-system, BlinkMacSystemFont, sans-serif !important;
+    color: var(--gm-text);
+}
+
+.stApp {
+    background: var(--gm-bg);
+}
+
+/* ── Sidebar ── */
+section[data-testid="stSidebar"] {
+    background: linear-gradient(180deg, #1e1b4b 0%, #312e81 50%, #3730a3 100%) !important;
+    border-right: none !important;
+}
+
+section[data-testid="stSidebar"] * {
+    color: #e0e7ff !important;
+}
+
+section[data-testid="stSidebar"] .stSelectbox label,
+section[data-testid="stSidebar"] .stRadio label,
+section[data-testid="stSidebar"] .stCheckbox label,
+section[data-testid="stSidebar"] .stTextArea label {
+    color: #c7d2fe !important;
+    font-weight: 500 !important;
+    font-size: 0.85rem !important;
+}
+
+section[data-testid="stSidebar"] .stMarkdown h2 {
+    color: #ffffff !important;
+    font-size: 1.1rem !important;
+    font-weight: 700 !important;
+    letter-spacing: -0.02em;
+}
+
+section[data-testid="stSidebar"] .stMarkdown h3 {
+    color: #a5b4fc !important;
+    font-size: 0.95rem !important;
+    font-weight: 600 !important;
+}
+
+section[data-testid="stSidebar"] hr {
+    border-color: rgba(165,180,252,0.2) !important;
+}
+
+section[data-testid="stSidebar"] .stExpander {
+    background: rgba(255,255,255,0.06) !important;
+    border: 1px solid rgba(255,255,255,0.1) !important;
+    border-radius: var(--gm-radius-sm) !important;
+}
+
+/* ── Cards ── */
+.gm-card {
+    background: var(--gm-surface);
+    border: 1px solid var(--gm-border);
+    border-radius: var(--gm-radius);
+    padding: 1.5rem;
+    margin-bottom: 1rem;
+    box-shadow: var(--gm-shadow);
+    transition: var(--gm-transition);
+}
+
+.gm-card:hover {
+    box-shadow: var(--gm-shadow-lg);
+    border-color: var(--gm-primary-light);
+    transform: translateY(-1px);
+}
+
+/* ── Call Cards ── */
+.gm-call-card {
+    background: var(--gm-surface);
+    border: 1px solid var(--gm-border);
+    border-radius: var(--gm-radius);
+    padding: 1.25rem 1.5rem;
+    margin-bottom: 0.75rem;
+    box-shadow: var(--gm-shadow);
+    transition: var(--gm-transition);
+    position: relative;
+    overflow: hidden;
+}
+
+.gm-call-card::before {
+    content: '';
+    position: absolute;
+    left: 0;
+    top: 0;
+    bottom: 0;
+    width: 4px;
+    background: var(--gm-primary);
+    border-radius: 0 2px 2px 0;
+}
+
+.gm-call-card:hover {
+    box-shadow: var(--gm-shadow-lg);
+    border-color: var(--gm-primary-light);
+    transform: translateY(-2px);
+}
+
+.gm-call-card h4 {
+    color: var(--gm-text);
+    font-weight: 600;
+    font-size: 1rem;
+    line-height: 1.4;
+    margin: 0;
+}
+
+.gm-call-card p {
+    font-size: 0.85rem;
+}
+
+/* ── Status Badges ── */
+.gm-badge-open {
+    background: linear-gradient(135deg, #dcfce7, #bbf7d0);
+    color: #166534;
+    padding: 0.25rem 0.75rem;
+    border-radius: 20px;
+    font-size: 0.75rem;
+    font-weight: 600;
+    letter-spacing: 0.02em;
+    display: inline-block;
+    border: 1px solid #86efac;
+}
+
+.gm-badge-forthcoming {
+    background: linear-gradient(135deg, #fef9c3, #fde68a);
+    color: #854d0e;
+    padding: 0.25rem 0.75rem;
+    border-radius: 20px;
+    font-size: 0.75rem;
+    font-weight: 600;
+    letter-spacing: 0.02em;
+    display: inline-block;
+    border: 1px solid #fcd34d;
+}
+
+.gm-badge-closed {
+    background: linear-gradient(135deg, #fee2e2, #fecaca);
+    color: #991b1b;
+    padding: 0.25rem 0.75rem;
+    border-radius: 20px;
+    font-size: 0.75rem;
+    font-weight: 600;
+    letter-spacing: 0.02em;
+    display: inline-block;
+    border: 1px solid #fca5a5;
+}
+
+/* ── Match Score Badge ── */
+.gm-match-high {
+    background: linear-gradient(135deg, #10b981, #059669);
+    color: white;
+    padding: 0.3rem 0.9rem;
+    border-radius: 20px;
+    font-size: 0.8rem;
+    font-weight: 700;
+    display: inline-block;
+}
+
+.gm-match-medium {
+    background: linear-gradient(135deg, #f59e0b, #d97706);
+    color: white;
+    padding: 0.3rem 0.9rem;
+    border-radius: 20px;
+    font-size: 0.8rem;
+    font-weight: 700;
+    display: inline-block;
+}
+
+.gm-match-low {
+    background: linear-gradient(135deg, #ef4444, #dc2626);
+    color: white;
+    padding: 0.3rem 0.9rem;
+    border-radius: 20px;
+    font-size: 0.8rem;
+    font-weight: 700;
+    display: inline-block;
+}
+
+/* ── Hero Header ── */
+.gm-hero {
+    background: linear-gradient(135deg, #1e1b4b 0%, #312e81 40%, #4f46e5 100%);
+    border-radius: 20px;
+    padding: 2.5rem 2rem;
+    text-align: center;
+    margin-bottom: 2rem;
+    box-shadow: var(--gm-shadow-xl);
+    position: relative;
+    overflow: hidden;
+}
+
+.gm-hero::before {
+    content: '';
+    position: absolute;
+    top: -50%;
+    left: -50%;
+    width: 200%;
+    height: 200%;
+    background: radial-gradient(circle, rgba(99,102,241,0.15) 0%, transparent 60%);
+    animation: gm-pulse 8s ease-in-out infinite;
+}
+
+@keyframes gm-pulse {
+    0%, 100% { transform: scale(1); opacity: 0.5; }
+    50% { transform: scale(1.1); opacity: 0.8; }
+}
+
+.gm-hero h1 {
+    color: #ffffff !important;
+    font-size: 2.2rem !important;
+    font-weight: 800 !important;
+    margin: 0 0 0.3rem 0 !important;
+    letter-spacing: -0.03em;
+    position: relative;
+}
+
+.gm-hero .gm-subtitle {
+    color: #c7d2fe;
+    font-size: 1rem;
+    font-weight: 400;
+    margin: 0;
+    position: relative;
+}
+
+.gm-hero .gm-tags {
+    color: #a5b4fc;
+    font-size: 0.8rem;
+    margin-top: 0.8rem;
+    position: relative;
+}
+
+.gm-hero .gm-tags span {
+    background: rgba(255,255,255,0.1);
+    padding: 0.2rem 0.6rem;
+    border-radius: 12px;
+    margin: 0 0.15rem;
+    display: inline-block;
+    margin-bottom: 0.3rem;
+    border: 1px solid rgba(255,255,255,0.1);
+}
+
+/* ── Metric Cards ── */
+.gm-metric {
+    background: var(--gm-surface);
+    border: 1px solid var(--gm-border);
+    border-radius: var(--gm-radius);
+    padding: 1.2rem 1.5rem;
+    text-align: center;
+    box-shadow: var(--gm-shadow);
+    transition: var(--gm-transition);
+}
+
+.gm-metric:hover {
+    transform: translateY(-2px);
+    box-shadow: var(--gm-shadow-lg);
+}
+
+.gm-metric .gm-metric-value {
+    font-size: 1.8rem;
+    font-weight: 800;
+    color: var(--gm-primary);
+    line-height: 1;
+    margin-bottom: 0.3rem;
+}
+
+.gm-metric .gm-metric-label {
+    font-size: 0.8rem;
+    font-weight: 500;
+    color: var(--gm-text-secondary);
+    text-transform: uppercase;
+    letter-spacing: 0.05em;
+}
+
+.gm-metric .gm-metric-delta {
+    font-size: 0.75rem;
+    margin-top: 0.2rem;
+}
+
+/* ── Score Bar ── */
+.gm-score-container {
+    margin-bottom: 1.2rem;
+}
+
+.gm-score-header {
+    display: flex;
+    justify-content: space-between;
+    align-items: baseline;
+    margin-bottom: 0.4rem;
+}
+
+.gm-score-label {
+    font-weight: 600;
+    font-size: 0.95rem;
+    color: var(--gm-text);
+}
+
+.gm-score-value {
+    font-weight: 800;
+    font-size: 1.1rem;
+}
+
+.gm-score-track {
+    background: #e2e8f0;
+    border-radius: 12px;
+    height: 14px;
+    position: relative;
+    overflow: hidden;
+}
+
+.gm-score-fill {
+    height: 100%;
+    border-radius: 12px;
+    transition: width 1s cubic-bezier(0.4, 0, 0.2, 1);
+    background-size: 200% 200%;
+}
+
+.gm-score-fill-green {
+    background: linear-gradient(90deg, #10b981, #34d399);
+}
+
+.gm-score-fill-yellow {
+    background: linear-gradient(90deg, #f59e0b, #fbbf24);
+}
+
+.gm-score-fill-red {
+    background: linear-gradient(90deg, #ef4444, #f87171);
+}
+
+.gm-score-threshold {
+    position: absolute;
+    top: -2px;
+    height: calc(100% + 4px);
+    width: 3px;
+    background: #1e293b;
+    border-radius: 2px;
+    z-index: 2;
+}
+
+.gm-score-meta {
+    display: flex;
+    justify-content: space-between;
+    margin-top: 0.3rem;
+    font-size: 0.75rem;
+    color: var(--gm-text-muted);
+}
+
+/* ── Section Headers ── */
+.gm-section-header {
+    display: flex;
+    align-items: center;
+    gap: 0.6rem;
+    margin: 2rem 0 1rem 0;
+    padding-bottom: 0.5rem;
+    border-bottom: 2px solid var(--gm-border);
+}
+
+.gm-section-header .gm-section-icon {
+    font-size: 1.4rem;
+}
+
+.gm-section-header h2 {
+    font-size: 1.3rem !important;
+    font-weight: 700 !important;
+    color: var(--gm-text) !important;
+    margin: 0 !important;
+    letter-spacing: -0.02em;
+}
+
+/* ── Feature Grid ── */
+.gm-feature-grid {
+    display: grid;
+    grid-template-columns: repeat(auto-fill, minmax(280px, 1fr));
+    gap: 1rem;
+    margin: 1.5rem 0;
+}
+
+.gm-feature-item {
+    background: var(--gm-surface);
+    border: 1px solid var(--gm-border);
+    border-radius: var(--gm-radius-sm);
+    padding: 1.2rem;
+    transition: var(--gm-transition);
+}
+
+.gm-feature-item:hover {
+    border-color: var(--gm-primary-light);
+    box-shadow: var(--gm-shadow);
+    transform: translateY(-1px);
+}
+
+.gm-feature-item .gm-feature-icon {
+    font-size: 1.6rem;
+    margin-bottom: 0.5rem;
+}
+
+.gm-feature-item h4 {
+    font-size: 0.9rem;
+    font-weight: 600;
+    color: var(--gm-text);
+    margin: 0 0 0.3rem 0;
+}
+
+.gm-feature-item p {
+    font-size: 0.8rem;
+    color: var(--gm-text-secondary);
+    margin: 0;
+    line-height: 1.5;
+}
+
+/* ── Streamlit Overrides ── */
+.stButton > button {
+    border-radius: var(--gm-radius-sm) !important;
+    font-weight: 600 !important;
+    font-size: 0.85rem !important;
+    padding: 0.5rem 1.2rem !important;
+    transition: var(--gm-transition) !important;
+    border: 1px solid var(--gm-border) !important;
+}
+
+.stButton > button[kind="primary"] {
+    background: linear-gradient(135deg, var(--gm-primary), var(--gm-primary-dark)) !important;
+    border: none !important;
+    color: white !important;
+    box-shadow: 0 2px 8px rgba(99,102,241,0.3) !important;
+}
+
+.stButton > button[kind="primary"]:hover {
+    box-shadow: 0 4px 16px rgba(99,102,241,0.4) !important;
+    transform: translateY(-1px) !important;
+}
+
+.stExpander {
+    background: var(--gm-surface) !important;
+    border: 1px solid var(--gm-border) !important;
+    border-radius: var(--gm-radius-sm) !important;
+    box-shadow: var(--gm-shadow) !important;
+    margin-bottom: 0.75rem !important;
+}
+
+div[data-testid="stMetricValue"] {
+    font-weight: 700 !important;
+}
+
+.stTabs [data-baseweb="tab-list"] {
+    gap: 0.5rem;
+    background: var(--gm-surface);
+    padding: 0.3rem;
+    border-radius: var(--gm-radius-sm);
+    border: 1px solid var(--gm-border);
+}
+
+.stTabs [data-baseweb="tab"] {
+    border-radius: var(--gm-radius-xs) !important;
+    font-weight: 600 !important;
+    font-size: 0.85rem !important;
+    padding: 0.5rem 1rem !important;
+}
+
+.stTabs [aria-selected="true"] {
+    background: var(--gm-primary) !important;
+    color: white !important;
+}
+
+/* File uploader */
+[data-testid="stFileUploader"] {
+    border: 2px dashed var(--gm-border) !important;
+    border-radius: var(--gm-radius) !important;
+    padding: 2rem !important;
+    background: var(--gm-surface) !important;
+    transition: var(--gm-transition);
+}
+
+[data-testid="stFileUploader"]:hover {
+    border-color: var(--gm-primary-light) !important;
+    background: #f5f3ff !important;
+}
+
+/* Download buttons */
+.stDownloadButton > button {
+    background: var(--gm-surface) !important;
+    border: 1px solid var(--gm-border) !important;
+    border-radius: var(--gm-radius-sm) !important;
+    font-weight: 600 !important;
+    transition: var(--gm-transition) !important;
+}
+
+.stDownloadButton > button:hover {
+    border-color: var(--gm-primary) !important;
+    background: #f5f3ff !important;
+    box-shadow: var(--gm-shadow) !important;
+}
+
+/* Progress bar */
+.stProgress > div > div {
+    background: linear-gradient(90deg, var(--gm-primary), var(--gm-secondary)) !important;
+    border-radius: 10px !important;
+}
+
+/* Alert boxes */
+.stAlert {
+    border-radius: var(--gm-radius-sm) !important;
+}
+
+/* ── Funding Probability Gauge ── */
+.gm-gauge {
+    text-align: center;
+    padding: 1rem;
+}
+
+.gm-gauge-circle {
+    width: 120px;
+    height: 120px;
+    border-radius: 50%;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    margin: 0 auto 0.5rem auto;
+    font-size: 1.8rem;
+    font-weight: 800;
+    color: white;
+    position: relative;
+}
+
+.gm-gauge-high {
+    background: conic-gradient(#10b981 0deg, #10b981 var(--pct-deg), #e2e8f0 var(--pct-deg));
+}
+
+.gm-gauge-medium {
+    background: conic-gradient(#f59e0b 0deg, #f59e0b var(--pct-deg), #e2e8f0 var(--pct-deg));
+}
+
+.gm-gauge-low {
+    background: conic-gradient(#ef4444 0deg, #ef4444 var(--pct-deg), #e2e8f0 var(--pct-deg));
+}
+
+/* ── Responsive ── */
+@media (max-width: 768px) {
+    .gm-hero { padding: 1.5rem 1rem; }
+    .gm-hero h1 { font-size: 1.6rem !important; }
+    .gm-feature-grid { grid-template-columns: 1fr; }
+}
+</style>
+""", unsafe_allow_html=True)
 
 # Initialize cache in session state
 if "call_cache" not in st.session_state:
@@ -91,7 +673,7 @@ def llm_call_wrapper(client):
 
 
 # ═══════════════════════════════════════════════════════════
-# PROMPTS (enhanced per research report)
+# PROMPTS
 # ═══════════════════════════════════════════════════════════
 SYS_ESR = """You are an experienced Horizon Europe evaluator (10+ years, multiple Framework Programmes).
 
@@ -234,7 +816,6 @@ Respond JSON:
 # FUNDING PROBABILITY HELPERS
 # ═══════════════════════════════════════════════════════════
 def _calc_funding_probability(total, max_score, threshold, all_met):
-    """Enhanced funding probability label."""
     if not all_met or total < threshold:
         return "very_low"
     ratio = total / max_score if max_score > 0 else 0
@@ -248,15 +829,12 @@ def _calc_funding_probability(total, max_score, threshold, all_met):
 
 
 def _calc_funding_pct(total, max_score, threshold, all_met):
-    """Numeric funding probability estimate (0-100)."""
     if not all_met or total < threshold:
         return 5
-
     if max_score <= 0:
         return 5
 
     ratio = total / max_score
-    # Non-linear mapping based on typical Horizon success rates
     if ratio >= 0.95:
         base = 85
     elif ratio >= 0.90:
@@ -272,16 +850,14 @@ def _calc_funding_pct(total, max_score, threshold, all_met):
     else:
         base = 5
 
-    # Confidence adjustment based on how close to threshold
     margin = total - threshold
     if margin < 1.0:
-        base = int(base * 0.7)  # Close to threshold = less certain
+        base = int(base * 0.7)
 
     return min(base, 95)
 
 
 def _check_double_penalization(criteria: List[Dict]) -> List[str]:
-    """Check if similar weaknesses appear in multiple criteria (research report requirement)."""
     warnings = []
     all_weaknesses = []
     for c in criteria:
@@ -312,21 +888,9 @@ class Evaluator:
 
     def _section_text(self, proposal, criterion):
         mapping = {
-            "Excellence": [
-                SectionType.EXCELLENCE,
-                SectionType.OPEN_SCIENCE,
-                SectionType.GENDER_DIMENSION,
-            ],
-            "Impact": [
-                SectionType.IMPACT,
-                SectionType.DISSEMINATION,
-                SectionType.EXPLOITATION,
-            ],
-            "Implementation": [
-                SectionType.IMPLEMENTATION,
-                SectionType.WORK_PACKAGES,
-                SectionType.RISK_TABLE,
-            ],
+            "Excellence": [SectionType.EXCELLENCE, SectionType.OPEN_SCIENCE, SectionType.GENDER_DIMENSION],
+            "Impact": [SectionType.IMPACT, SectionType.DISSEMINATION, SectionType.EXPLOITATION],
+            "Implementation": [SectionType.IMPLEMENTATION, SectionType.WORK_PACKAGES, SectionType.RISK_TABLE],
         }
         texts = [
             proposal.sections[s].content
@@ -340,8 +904,8 @@ class Evaluator:
         if criterion == "Excellence":
             return t[: n // 3]
         elif criterion == "Impact":
-            return t[n // 3 : 2 * n // 3]
-        return t[2 * n // 3 :]
+            return t[n // 3: 2 * n // 3]
+        return t[2 * n // 3:]
 
     def _cross_ctx(self, proposal):
         return "\n".join(
@@ -351,12 +915,9 @@ class Evaluator:
         )
 
     def _get_rag_context(self, criterion, action_type, section_text, use_ai_rag=True):
-        """Get RAG-enhanced knowledge context."""
         if use_ai_rag:
             try:
-                return ai_enhanced_retrieval(
-                    criterion, action_type, section_text, self.llm_fn
-                )
+                return ai_enhanced_retrieval(criterion, action_type, section_text, self.llm_fn)
             except Exception:
                 pass
         return rag_get_context(criterion, action_type, section_text[:500])
@@ -371,11 +932,9 @@ class Evaluator:
             if on_progress:
                 on_progress(f"📝 {i + 1}/{len(cfg.criteria)}: {cc.name}...")
 
-            # SECTION-AWARE: get correct section text
             sec = self._section_text(proposal, cc.name)
             cross = self._cross_ctx(proposal)
 
-            # RAG-ENHANCED: get AI-synthesized knowledge context
             if on_progress:
                 on_progress(f"🧠 {cc.name} bilgi tabanı hazırlanıyor...")
             kb_ctx = self._get_rag_context(cc.name, action_type.value, sec, use_ai_rag)
@@ -387,17 +946,11 @@ class Evaluator:
                 r = json.loads(raw)
             except json.JSONDecodeError:
                 r = {
-                    "criterion": cc.name,
-                    "score": 0,
-                    "confidence_low": 0,
-                    "confidence_high": 0,
-                    "consensus_risk": "high",
-                    "strengths": [],
-                    "weaknesses": ["JSON parse hatası"],
-                    "weakness_categories": [],
-                    "sub_signal_assessments": [],
-                    "esr_comment": "Parse hatası.",
-                    "alternative_reading": "",
+                    "criterion": cc.name, "score": 0, "confidence_low": 0,
+                    "confidence_high": 0, "consensus_risk": "high",
+                    "strengths": [], "weaknesses": ["JSON parse hatası"],
+                    "weakness_categories": [], "sub_signal_assessments": [],
+                    "esr_comment": "Parse hatası.", "alternative_reading": "",
                     "topic_alignment": "",
                 }
 
@@ -415,20 +968,12 @@ class Evaluator:
                 all_met = False
             results["criteria"].append(r)
 
-            # Coaching
             if on_progress:
                 on_progress(f"💡 {cc.name} koçluk...")
             raw2 = call_llm(
-                self.client,
-                SYS_COACH,
-                build_coach_prompt(
-                    cc.name,
-                    s,
-                    r.get("weaknesses", []),
-                    r.get("weakness_categories", []),
-                    sec,
-                    cc.practical_checklist,
-                ),
+                self.client, SYS_COACH,
+                build_coach_prompt(cc.name, s, r.get("weaknesses", []),
+                                   r.get("weakness_categories", []), sec, cc.practical_checklist),
                 temp=0.4,
             )
             try:
@@ -438,83 +983,70 @@ class Evaluator:
             co["criterion"] = cc.name
             results["coaching"].append(co)
 
-        # Aggregation
         results["total_weighted"] = round(total_w, 1)
         results["total_max"] = cfg.total_max
         results["total_threshold"] = cfg.total_threshold
         results["total_threshold_met"] = all_met and total_w >= cfg.total_threshold
         results["all_criteria_met"] = all_met
+        results["funding_probability"] = _calc_funding_probability(total_w, cfg.total_max, cfg.total_threshold, all_met)
+        results["funding_probability_pct"] = _calc_funding_pct(total_w, cfg.total_max, cfg.total_threshold, all_met)
 
-        # ENHANCED funding probability
-        results["funding_probability"] = _calc_funding_probability(
-            total_w, cfg.total_max, cfg.total_threshold, all_met
-        )
-        results["funding_probability_pct"] = _calc_funding_pct(
-            total_w, cfg.total_max, cfg.total_threshold, all_met
-        )
-
-        # Cross-cutting weakness detection
         cats = []
         for c in results["criteria"]:
             cats.extend(c.get("weakness_categories", []))
         cc2 = Counter(cats)
         results["cross_cutting_issues"] = [
             f"'{WEAKNESS_TAXONOMY[k]['label']}' — {v} kriterde: {WEAKNESS_TAXONOMY[k]['description']}"
-            for k, v in cc2.items()
-            if v > 1 and k in WEAKNESS_TAXONOMY
+            for k, v in cc2.items() if v > 1 and k in WEAKNESS_TAXONOMY
         ]
-
-        # Double-penalization check
-        results["double_penalization_warnings"] = _check_double_penalization(
-            results["criteria"]
-        )
+        results["double_penalization_warnings"] = _check_double_penalization(results["criteria"])
 
         return results
 
 
 # ═══════════════════════════════════════════════════════════
-# UI COMPONENTS
+# UI COMPONENTS — MODERN
 # ═══════════════════════════════════════════════════════════
 def render_header():
-    st.markdown(
-        """
-    <div style="text-align:center;padding:1rem 0;">
-        <h1 style="font-size:2.4rem;font-weight:800;color:#1a1a2e;margin-bottom:0.2rem;">
-            🔬 GrantMirror-AI
-        </h1>
-        <p style="font-size:1.1rem;color:#555;">
-            Horizon Europe Proposal Pre-Screening & ESR Simulator
-        </p>
-        <p style="font-size:0.85rem;color:#888;">
-            Canlı çağrı verisi · AI çağrı eşleştirme · RAG bilgi motoru ·
-            Hakem simülasyonu · ESR eleştiri tahmini · Düzeltme planı
-        </p>
-    </div><hr>""",
-        unsafe_allow_html=True,
-    )
+    st.markdown("""
+    <div class="gm-hero">
+        <h1>🔬 GrantMirror-AI</h1>
+        <p class="gm-subtitle">Horizon Europe Proposal Pre-Screening & ESR Simulator</p>
+        <div class="gm-tags">
+            <span>📡 Canlı Çağrı</span>
+            <span>🎯 AI Eşleştirme</span>
+            <span>🧠 RAG Motor</span>
+            <span>📋 ESR Simülasyon</span>
+            <span>🎯 Koçluk</span>
+            <span>📊 Güven Aralığı</span>
+        </div>
+    </div>
+    """, unsafe_allow_html=True)
 
 
 def render_call_dashboard():
-    """Render live call data dashboard."""
-    st.markdown("## 📡 Canlı Çağrı Paneli")
+    """Render live call data dashboard with modern UI."""
+    st.markdown("""
+    <div class="gm-section-header">
+        <span class="gm-section-icon">📡</span>
+        <h2>Canlı Çağrı Paneli</h2>
+    </div>
+    """, unsafe_allow_html=True)
 
     col1, col2, col3 = st.columns(3)
     with col1:
         search = st.text_input("🔍 Arama", placeholder="Anahtar kelime...")
     with col2:
         status_filter = st.selectbox(
-            "📋 Durum",
-            ["", "Open", "Forthcoming", "Closed"],
+            "📋 Durum", ["", "Open", "Forthcoming", "Closed"],
             format_func=lambda x: x if x else "Tümü",
         )
     with col3:
         programme_filter = st.selectbox(
-            "🏛️ Program",
-            ["HORIZON", ""],
+            "🏛️ Program", ["HORIZON", ""],
             format_func=lambda x: x if x else "Tümü",
         )
 
-    # Fetch with cache
     cache_key = f"calls_{search}_{status_filter}_{programme_filter}"
     cached = st.session_state.call_cache.get(cache_key)
 
@@ -531,55 +1063,68 @@ def render_call_dashboard():
             st.session_state.call_cache.set(cache_key, (calls, total))
 
     if not calls:
-        st.info(
-            "Çağrı bulunamadı veya API yanıt vermedi. Arama kriterlerini değiştirin."
-        )
+        st.info("Çağrı bulunamadı veya API yanıt vermedi. Arama kriterlerini değiştirin.")
         return None
 
     st.markdown(f"**{total}** çağrı bulundu (ilk {len(calls)} gösteriliyor)")
 
-    # Display calls as cards
+    # ── Excel Export ──
+    excel_bytes = calls_to_excel_bytes(calls)
+    st.download_button(
+        label="📥 Çağrıları Excel Olarak İndir",
+        data=excel_bytes,
+        file_name="horizon_calls.xlsx",
+        mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+        use_container_width=True,
+    )
+
+    st.markdown("<div style='height:0.5rem'></div>", unsafe_allow_html=True)
+
+    # ── Display calls as modern cards ──
     selected_call = None
     for i, call in enumerate(calls):
         status = call.get("status", "?")
-        status_color = {"Open": "🟢", "Forthcoming": "🟡", "Closed": "🔴"}.get(
-            status, "⚪"
-        )
+        badge_class = {
+            "Open": "gm-badge-open",
+            "Forthcoming": "gm-badge-forthcoming",
+            "Closed": "gm-badge-closed",
+        }.get(status, "gm-badge-closed")
+
         action_types = ", ".join(call.get("action_types", ["?"]))
         deadline = call.get("deadline", "N/A")
         if deadline and len(deadline) > 10:
             deadline = deadline[:10]
 
-        with st.container():
-            cols = st.columns([0.5, 4, 1.5, 1.5, 1])
-            with cols[0]:
-                st.markdown(f"### {status_color}")
-            with cols[1]:
-                st.markdown(f"**{call.get('title', 'N/A')[:80]}**")
-                topics = call.get("topics", [])
-                if topics:
-                    st.caption(
-                        f"Topics: {', '.join(t.get('topic_id', '') for t in topics[:3])}"
-                    )
-            with cols[2]:
-                st.caption(f"📅 {deadline}")
-            with cols[3]:
-                st.caption(f"🏷️ {action_types}")
-            with cols[4]:
-                if st.button("Seç", key=f"call_{i}", use_container_width=True):
-                    selected_call = call
-
         st.markdown(
-            "<hr style='margin:0.2rem 0;border:none;border-top:1px solid #eee;'>",
+            f"""
+            <div class="gm-call-card">
+                <div style="display:flex;justify-content:space-between;align-items:center;">
+                    <div>
+                        <span class="{badge_class}">{status}</span>
+                        <h4 style="margin:0.6rem 0 0.2rem 0;">{call.get('title', 'N/A')[:120]}</h4>
+                        <p style="color:#667085;margin:0;">{call.get('call_id', 'N/A')}</p>
+                        <p style="color:#667085;margin:0.3rem 0 0 0;">🏷️ {action_types} · 📅 {deadline}</p>
+                    </div>
+                </div>
+            </div>
+            """,
             unsafe_allow_html=True,
         )
+
+        if st.button("Bu çağrıyı seç", key=f"call_{i}", use_container_width=True):
+            selected_call = call
 
     return selected_call
 
 
 def render_call_detail(call_data: Dict) -> Dict:
     """Show selected call details and fetch topic info."""
-    st.markdown("### 📋 Seçilen Çağrı Detayı")
+    st.markdown("""
+    <div class="gm-section-header">
+        <span class="gm-section-icon">📋</span>
+        <h2>Seçilen Çağrı Detayı</h2>
+    </div>
+    """, unsafe_allow_html=True)
 
     col1, col2, col3 = st.columns(3)
     with col1:
@@ -587,9 +1132,7 @@ def render_call_detail(call_data: Dict) -> Dict:
     with col2:
         st.metric(
             "Son Tarih",
-            call_data.get("deadline", "N/A")[:10]
-            if call_data.get("deadline")
-            else "N/A",
+            call_data.get("deadline", "N/A")[:10] if call_data.get("deadline") else "N/A",
         )
     with col3:
         action_type = detect_action_type_from_call(call_data)
@@ -597,7 +1140,6 @@ def render_call_detail(call_data: Dict) -> Dict:
 
     st.markdown(f"**Başlık**: {call_data.get('title', 'N/A')}")
 
-    # Fetch topic details
     topics = call_data.get("topics", [])
     topic_details = None
     if topics:
@@ -616,12 +1158,8 @@ def render_call_detail(call_data: Dict) -> Dict:
         with st.expander("📝 Topic Açıklaması", expanded=False):
             st.markdown(topic_details["description"][:3000])
 
-    # Build call-specific criteria context
     call_context = build_call_specific_criteria(call_data, topic_details)
-
-    st.success(
-        f"✅ Aksiyon türü: **{action_type}** | Çağrı-spesifik değerlendirme bağlamı hazır"
-    )
+    st.success(f"✅ Aksiyon türü: **{action_type}** | Çağrı-spesifik değerlendirme bağlamı hazır")
 
     return call_context
 
@@ -629,41 +1167,41 @@ def render_call_detail(call_data: Dict) -> Dict:
 def render_score_bar(score, mx, thr, label):
     pct = score / mx * 100 if mx > 0 else 0
     tp = thr / mx * 100 if mx > 0 else 0
-    clr = (
-        "#2ecc71"
-        if score >= thr + 1
-        else "#f39c12"
-        if score >= thr
-        else "#e74c3c"
-    )
-    st.markdown(
-        f"""<div style="margin-bottom:1rem;">
-        <div style="display:flex;justify-content:space-between;">
-            <span style="font-weight:600;">{label}</span>
-            <span style="font-weight:700;color:{clr};">{score}/{mx}</span>
+
+    if score >= thr + 1:
+        fill_class = "gm-score-fill-green"
+        color = "#10b981"
+    elif score >= thr:
+        fill_class = "gm-score-fill-yellow"
+        color = "#f59e0b"
+    else:
+        fill_class = "gm-score-fill-red"
+        color = "#ef4444"
+
+    st.markdown(f"""
+    <div class="gm-score-container">
+        <div class="gm-score-header">
+            <span class="gm-score-label">{label}</span>
+            <span class="gm-score-value" style="color:{color};">{score}/{mx}</span>
         </div>
-        <div style="background:#e8e8e8;border-radius:10px;height:22px;position:relative;overflow:hidden;">
-            <div style="background:{clr};width:{pct}%;height:100%;border-radius:10px;"></div>
-            <div style="position:absolute;left:{tp}%;top:0;height:100%;width:2px;background:#333;"></div>
+        <div class="gm-score-track">
+            <div class="gm-score-fill {fill_class}" style="width:{pct}%;"></div>
+            <div class="gm-score-threshold" style="left:{tp}%;"></div>
         </div>
-        <div style="font-size:0.75rem;color:#888;">
-            Eşik: {thr} | {'✅' if score >= thr else '❌'}
+        <div class="gm-score-meta">
+            <span>Eşik: {thr}</span>
+            <span>{'✅ Geçti' if score >= thr else '❌ Geçemedi'}</span>
         </div>
-    </div>""",
-        unsafe_allow_html=True,
-    )
+    </div>
+    """, unsafe_allow_html=True)
 
 
 def render_eligibility(elig):
     icon_map = {"pass": "✅", "fail": "❌", "warning": "⚠️", "info": "ℹ️", "unable": "❓"}
-    with st.expander(
-        f"{'✅' if elig.is_eligible else '❌'} Uygunluk Kontrolü",
-        expanded=not elig.is_eligible,
-    ):
+    status_icon = "✅" if elig.is_eligible else "❌"
+    with st.expander(f"{status_icon} Uygunluk Kontrolü", expanded=not elig.is_eligible):
         for ch in elig.results:
-            st.markdown(
-                f"{icon_map.get(ch.status.value, '')} **{ch.check_name}**: {ch.message}"
-            )
+            st.markdown(f"{icon_map.get(ch.status.value, '')} **{ch.check_name}**: {ch.message}")
             if ch.details:
                 st.caption(ch.details)
 
@@ -678,21 +1216,34 @@ def render_criterion(crit, coach, show_coach):
 
     c1, c2, c3 = st.columns(3)
     with c1:
-        st.metric(
-            "Güven Aralığı",
-            f"{crit.get('confidence_low', '?')} – {crit.get('confidence_high', '?')}",
-        )
+        st.markdown(f"""
+        <div class="gm-metric">
+            <div class="gm-metric-value" style="font-size:1.2rem;">{crit.get('confidence_low', '?')} – {crit.get('confidence_high', '?')}</div>
+            <div class="gm-metric-label">Güven Aralığı</div>
+        </div>
+        """, unsafe_allow_html=True)
     with c2:
         risk = crit.get("consensus_risk", "?")
         ri = {"low": "🟢", "medium": "🟡", "high": "🔴"}.get(risk, "⚪")
-        st.metric("Uzlaşma Riski", f"{ri} {risk}")
+        st.markdown(f"""
+        <div class="gm-metric">
+            <div class="gm-metric-value" style="font-size:1.2rem;">{ri} {risk}</div>
+            <div class="gm-metric-label">Uzlaşma Riski</div>
+        </div>
+        """, unsafe_allow_html=True)
     with c3:
-        st.metric("Ağırlıklı Puan", f"{crit.get('weighted_score', 0):.1f}")
+        st.markdown(f"""
+        <div class="gm-metric">
+            <div class="gm-metric-value" style="font-size:1.2rem;">{crit.get('weighted_score', 0):.1f}</div>
+            <div class="gm-metric-label">Ağırlıklı Puan</div>
+        </div>
+        """, unsafe_allow_html=True)
+
+    st.markdown("")
 
     st.markdown("#### 📋 ESR Yorumu")
     st.info(crit.get("esr_comment", "N/A"))
 
-    # Topic alignment (new)
     topic_align = crit.get("topic_alignment", "")
     if topic_align:
         with st.expander("🎯 Çağrı/Topic Uyumu"):
@@ -701,37 +1252,33 @@ def render_criterion(crit, coach, show_coach):
     col_s, col_w = st.columns(2)
     with col_s:
         st.markdown("##### ✅ Güçlü Yönler")
-        for s in crit.get("strengths", []):
-            st.markdown(f"- {s}")
+        for s_item in crit.get("strengths", []):
+            st.markdown(f"- {s_item}")
         if not crit.get("strengths"):
             st.caption("Tespit edilemedi.")
     with col_w:
         st.markdown("##### ❌ Zayıf Yönler")
-        for w in crit.get("weaknesses", []):
-            st.markdown(f"- {w}")
+        for w_item in crit.get("weaknesses", []):
+            st.markdown(f"- {w_item}")
         if not crit.get("weaknesses"):
             st.caption("Tespit edilemedi.")
 
     cats = crit.get("weakness_categories", [])
     if cats:
-        st.markdown(
-            "**🏷️ Kategoriler:** "
-            + " · ".join(
-                f"`{WEAKNESS_TAXONOMY.get(c, {}).get('label', c)}`" for c in cats
-            )
+        badges = " ".join(
+            f'<span style="background:#f1f5f9;border:1px solid #e2e8f0;padding:0.2rem 0.6rem;'
+            f'border-radius:12px;font-size:0.75rem;font-weight:600;color:#475569;margin-right:0.3rem;">'
+            f'{WEAKNESS_TAXONOMY.get(c, {}).get("label", c)}</span>'
+            for c in cats
         )
+        st.markdown(f"**🏷️ Kategoriler:** {badges}", unsafe_allow_html=True)
 
     subs = crit.get("sub_signal_assessments", [])
     if subs:
         with st.expander("📊 Alt Sinyaller"):
             for sa in subs:
                 r = sa.get("rating", "?")
-                ic = {
-                    "strong": "🟢",
-                    "adequate": "🟡",
-                    "weak": "🟠",
-                    "missing": "🔴",
-                }.get(r, "⚪")
+                ic = {"strong": "🟢", "adequate": "🟡", "weak": "🟠", "missing": "🔴"}.get(r, "⚪")
                 st.markdown(f"{ic} **{sa.get('signal', '?')}** — {r}")
                 if sa.get("evidence"):
                     st.caption(f'Kanıt: "{sa["evidence"][:150]}"')
@@ -745,59 +1292,97 @@ def render_criterion(crit, coach, show_coach):
 
     if show_coach and coach:
         st.markdown("---")
-        st.markdown("#### 🎯 Koçluk")
+        st.markdown("#### 🎯 Koçluk Önerileri")
         for imp in coach.get("improvements", []):
-            with st.expander(
-                f"🔧 P{imp.get('priority', '?')}: {imp.get('title', '?')} "
-                f"({imp.get('expected_score_gain', '?')})"
-            ):
+            pri = imp.get("priority", "?")
+            gain = imp.get("expected_score_gain", "?")
+            with st.expander(f"🔧 P{pri}: {imp.get('title', '?')} ({gain})"):
                 st.markdown(f"**Problem:** {imp.get('problem', '')}")
                 st.markdown(f"**Etki:** {imp.get('impact', '')}")
                 st.markdown(f"**Çözüm:** {imp.get('solution', '')}")
         if coach.get("summary"):
-            st.markdown(f"**Özet:** {coach['summary']}")
+            st.markdown(f"**📝 Özet:** {coach['summary']}")
 
 
 def render_overall(results):
-    st.markdown("## 📊 Genel Özet")
-    c1, c2, c3, c4 = st.columns(4)
+    st.markdown("""
+    <div class="gm-section-header">
+        <span class="gm-section-icon">📊</span>
+        <h2>Genel Değerlendirme Özeti</h2>
+    </div>
+    """, unsafe_allow_html=True)
+
     tw = results["total_weighted"]
+    tm = results["total_max"]
     thr = results["total_threshold"]
     met = results["total_threshold_met"]
+    fp = results.get("funding_probability", "very_low")
+    fp_pct = results.get("funding_probability_pct", 0)
 
+    pl = {"high": "🟢 Yüksek", "medium": "🟡 Orta", "low": "🟠 Düşük", "very_low": "🔴 Çok Düşük"}
+    fp_label = pl.get(fp, "?")
+
+    ok = sum(1 for c in results["criteria"] if c.get("threshold_met"))
+    total_criteria = len(results["criteria"])
+    sys_issues = len(results.get("cross_cutting_issues", []))
+
+    # Color for total
+    if met:
+        total_color = "#10b981"
+    elif tw >= thr * 0.8:
+        total_color = "#f59e0b"
+    else:
+        total_color = "#ef4444"
+
+    # Color for funding
+    fp_color = {"high": "#10b981", "medium": "#f59e0b", "low": "#f97316", "very_low": "#ef4444"}.get(fp, "#ef4444")
+
+    c1, c2, c3, c4 = st.columns(4)
     with c1:
-        st.metric(
-            "Toplam",
-            f"{tw}/{results['total_max']}",
-            delta=f"{tw - thr:+.1f}" if met else f"{tw - thr:.1f}",
-            delta_color="normal" if met else "inverse",
-        )
+        delta_val = tw - thr
+        delta_sign = "+" if delta_val >= 0 else ""
+        st.markdown(f"""
+        <div class="gm-metric">
+            <div class="gm-metric-value" style="color:{total_color};">{tw}/{tm}</div>
+            <div class="gm-metric-label">Toplam Ağırlıklı Puan</div>
+            <div class="gm-metric-delta" style="color:{total_color};">{delta_sign}{delta_val:.1f} eşikten</div>
+        </div>
+        """, unsafe_allow_html=True)
     with c2:
-        pl = {
-            "high": "🟢 Yüksek",
-            "medium": "🟡 Orta",
-            "low": "🟠 Düşük",
-            "very_low": "🔴 Çok Düşük",
-        }
-        fp_label = pl.get(results.get("funding_probability", ""), "?")
-        fp_pct = results.get("funding_probability_pct", 0)
-        st.metric("Fonlanma Olasılığı", f"{fp_label}", delta=f"~%{fp_pct}")
+        pct_deg = int(fp_pct * 3.6)
+        st.markdown(f"""
+        <div class="gm-metric">
+            <div class="gm-metric-value" style="color:{fp_color};">%{fp_pct}</div>
+            <div class="gm-metric-label">Fonlanma Olasılığı</div>
+            <div class="gm-metric-delta" style="color:{fp_color};">{fp_label}</div>
+        </div>
+        """, unsafe_allow_html=True)
     with c3:
-        ok = sum(1 for c in results["criteria"] if c.get("threshold_met"))
-        st.metric("Kriter Eşik", f"{ok}/{len(results['criteria'])}")
+        crit_color = "#10b981" if ok == total_criteria else "#f59e0b" if ok > 0 else "#ef4444"
+        st.markdown(f"""
+        <div class="gm-metric">
+            <div class="gm-metric-value" style="color:{crit_color};">{ok}/{total_criteria}</div>
+            <div class="gm-metric-label">Kriter Eşik Geçen</div>
+            <div class="gm-metric-delta">{'✅ Tümü geçti' if ok == total_criteria else '⚠️ Eksik var'}</div>
+        </div>
+        """, unsafe_allow_html=True)
     with c4:
-        st.metric("Sistemik Sorun", len(results.get("cross_cutting_issues", [])))
+        sys_color = "#10b981" if sys_issues == 0 else "#f59e0b" if sys_issues <= 2 else "#ef4444"
+        st.markdown(f"""
+        <div class="gm-metric">
+            <div class="gm-metric-value" style="color:{sys_color};">{sys_issues}</div>
+            <div class="gm-metric-label">Sistemik Sorun</div>
+            <div class="gm-metric-delta">{'✅ Temiz' if sys_issues == 0 else '⚠️ Dikkat'}</div>
+        </div>
+        """, unsafe_allow_html=True)
 
-    st.markdown("---")
+    st.markdown("<div style='height:1rem'></div>", unsafe_allow_html=True)
+
+    # Score bars
     cols = st.columns(len(results["criteria"]))
     for i, cr in enumerate(results["criteria"]):
         with cols[i]:
-            render_score_bar(
-                cr["score"],
-                cr["max_score"],
-                cr["threshold"],
-                cr.get("criterion", f"K{i + 1}"),
-            )
+            render_score_bar(cr["score"], cr["max_score"], cr["threshold"], cr.get("criterion", f"K{i + 1}"))
 
     # Cross-cutting
     cross = results.get("cross_cutting_issues", [])
@@ -806,7 +1391,6 @@ def render_overall(results):
         for iss in cross:
             st.warning(iss)
 
-    # Double-penalization warnings (research report requirement)
     dp = results.get("double_penalization_warnings", [])
     if dp:
         st.markdown("### 🔄 Çift Cezalandırma Uyarıları")
@@ -820,7 +1404,6 @@ def render_overall(results):
 def main():
     render_header()
 
-    # Navigation
     page = st.sidebar.radio(
         "📌 Sayfa",
         ["🔬 Değerlendirme", "📡 Canlı Çağrılar"],
@@ -841,35 +1424,30 @@ def render_calls_page():
         st.markdown("---")
         call_ctx = render_call_detail(selected_call)
 
-        # Store for evaluation page
         st.session_state["selected_call"] = selected_call
         st.session_state["call_context"] = call_ctx
 
-        st.info(
-            "💡 Bu çağrı için değerlendirme yapmak isterseniz "
-            "**Değerlendirme** sayfasına geçin ve teklif yükleyin."
-        )
+        st.info("💡 Bu çağrı için değerlendirme yapmak isterseniz **Değerlendirme** sayfasına geçin ve teklif yükleyin.")
 
 
 def render_evaluation_page():
-    """Page: Proposal evaluation."""
+    """Page: Proposal evaluation with modern UI."""
 
-    # ── SIDEBAR SETTINGS ──
+    # ── SIDEBAR ──
     with st.sidebar:
         st.markdown("## ⚙️ Ayarlar")
 
-        # Check if call was selected from dashboard
         has_call = "selected_call" in st.session_state
         if has_call:
             call_data = st.session_state["selected_call"]
             detected_at = detect_action_type_from_call(call_data)
-            st.success(f"📡 Seçili çağrı: {call_data.get('call_id', '?')}")
-            st.caption(f"Otomatik aksiyon türü: {detected_at}")
+            st.success(f"📡 {call_data.get('call_id', '?')}")
+            st.caption(f"Otomatik: {detected_at}")
             action = get_action_type_from_string(detected_at)
             use_call = st.checkbox("Çağrı bağlamını kullan", value=True)
         else:
             labels = {
-                ActionType.RIA: "🔬 RIA",
+                                ActionType.RIA: "🔬 RIA",
                 ActionType.IA: "🚀 IA",
                 ActionType.CSA: "🤝 CSA",
                 ActionType.MSCA_DN: "🎓 MSCA-DN",
@@ -888,14 +1466,12 @@ def render_evaluation_page():
         auto_action = st.session_state.get("auto_action_type", None)
         if auto_action and not has_call:
             action = auto_action
-            st.info(f"🎯 AI eşleştirmeden algılanan tür: {action.value}")
+            st.info(f"🎯 AI: {action.value}")
 
         cfg = ACTION_TYPE_CONFIGS[action]
         with st.expander("ℹ️ Kriter Detayları"):
             for cr in cfg.criteria:
-                st.markdown(
-                    f"**{cr.name}** (ağırlık: {cr.weight}, eşik: {cr.threshold}/{cr.max_score})"
-                )
+                st.markdown(f"**{cr.name}** (ağırlık: {cr.weight}, eşik: {cr.threshold}/{cr.max_score})")
                 for q in cr.official_questions:
                     st.caption(f"  • {q}")
 
@@ -930,60 +1506,123 @@ def render_evaluation_page():
         st.caption("⚠️ Bu araç resmî EC değerlendirmesinin yerini almaz.")
 
     # ── MAIN AREA ──
-    st.markdown("## 📤 Teklif Yükleme")
+    st.markdown("""
+    <div class="gm-section-header">
+        <span class="gm-section-icon">📤</span>
+        <h2>Teklif Yükleme</h2>
+    </div>
+    """, unsafe_allow_html=True)
+
     uploaded = st.file_uploader(
         "Horizon Europe Part B (PDF / DOCX)", type=["pdf", "docx", "doc"]
     )
 
     if not uploaded:
-        st.markdown(
-            """---
-### 🎯 GrantMirror-AI Ne Yapar?
-| Özellik | Açıklama |
-|---------|----------|
-| 📡 Canlı Çağrı | EC API'den açık çağrıları çeker, topic detaylarını gösterir |
-| 🎯 AI Eşleştirme | Teklifinizi en uygun çağrılarla otomatik eşleştirir |
-| 🧠 RAG Bilgi Motoru | Kriter bazlı AI-destekli bilgi sentezi |
-| 📋 ESR Simülasyonu | Çağrıya özel kriter bazlı hakem değerlendirmesi |
-| 🔍 Uygunluk | Sayfa, konsorsiyum, bölüm, kör değerlendirme kontrolü |
-| 🎯 Koçluk | Somut düzeltme önerileri, önceliklendirilmiş |
-| 📊 Güven Aralığı | Puan aralığı + uzlaşma riski + alternatif okuma |
-| 🔒 Kimlik Taraması | Kör çağrılar için kimlik ifşa tespiti |
-| 🏷️ Taksonomi | 12 zayıflık kategorisi (ESR analizlerinden) |
-| 🔄 Çift Ceza Kontrolü | Aynı kusurun birden fazla kriterde cezalandırılması uyarısı |
-| 📈 Fonlanma Tahmini | Non-linear olasılık hesaplama (%0-95) |"""
-        )
+        # Feature grid instead of table
+        st.markdown("""
+        <div class="gm-section-header">
+            <span class="gm-section-icon">🎯</span>
+            <h2>GrantMirror-AI Ne Yapar?</h2>
+        </div>
+        <div class="gm-feature-grid">
+            <div class="gm-feature-item">
+                <div class="gm-feature-icon">📡</div>
+                <h4>Canlı Çağrı Verisi</h4>
+                <p>EC API'den açık çağrıları gerçek zamanlı çeker, topic detaylarını gösterir, Excel'e aktarır</p>
+            </div>
+            <div class="gm-feature-item">
+                <div class="gm-feature-icon">🎯</div>
+                <h4>AI Çağrı Eşleştirme</h4>
+                <p>Teklifinizi en uygun Horizon Europe çağrılarıyla otomatik eşleştirir, uyum skoru verir</p>
+            </div>
+            <div class="gm-feature-item">
+                <div class="gm-feature-icon">🧠</div>
+                <h4>RAG Bilgi Motoru</h4>
+                <p>Kriter bazlı AI-destekli bilgi sentezi, 129 ESR + 1745 yorum analizinden</p>
+            </div>
+            <div class="gm-feature-item">
+                <div class="gm-feature-icon">📋</div>
+                <h4>ESR Simülasyonu</h4>
+                <p>Çağrıya özel kriter bazlı hakem değerlendirmesi, gerçek ESR formatında</p>
+            </div>
+            <div class="gm-feature-item">
+                <div class="gm-feature-icon">🎯</div>
+                <h4>Akıllı Koçluk</h4>
+                <p>Somut düzeltme önerileri, önceliklendirilmiş, beklenen puan etkisiyle</p>
+            </div>
+            <div class="gm-feature-item">
+                <div class="gm-feature-icon">📊</div>
+                <h4>Güven & Uzlaşma</h4>
+                <p>Puan aralığı + uzlaşma riski + alternatif okuma + fonlanma olasılığı (%0-95)</p>
+            </div>
+            <div class="gm-feature-item">
+                <div class="gm-feature-icon">🔒</div>
+                <h4>Kimlik Taraması</h4>
+                <p>Kör çağrılar için kimlik ifşa tespiti, kurum/isim/logo algılama</p>
+            </div>
+            <div class="gm-feature-item">
+                <div class="gm-feature-icon">🏷️</div>
+                <h4>Zayıflık Taksonomisi</h4>
+                <p>12 kategorili zayıflık sınıflandırma + çift cezalandırma kontrolü</p>
+            </div>
+        </div>
+        """, unsafe_allow_html=True)
         return
 
     fb = uploaded.read()
     fn = uploaded.name
 
     # ── PARSE ──
-    with st.spinner("📄 Belge okunuyor..."):
+    with st.spinner("📄 Belge okunuyor ve yapısı analiz ediliyor..."):
         try:
             proposal = parse_proposal(fb, fn)
         except Exception as e:
             st.error(f"❌ Belge hatası: {e}")
             return
 
-    with st.expander("📄 Belge Özeti"):
-        dc1, dc2, dc3 = st.columns(3)
-        dc1.metric("Sayfa", proposal.total_pages)
-        dc2.metric("Kelime", f"{proposal.total_words:,}")
-        dc3.metric("Bölüm", len(proposal.sections))
+    with st.expander("📄 Belge Özeti", expanded=False):
+        dc1, dc2, dc3, dc4 = st.columns(4)
+        with dc1:
+            st.markdown(f"""
+            <div class="gm-metric">
+                <div class="gm-metric-value">{proposal.total_pages}</div>
+                <div class="gm-metric-label">Sayfa</div>
+            </div>""", unsafe_allow_html=True)
+        with dc2:
+            st.markdown(f"""
+            <div class="gm-metric">
+                <div class="gm-metric-value">{proposal.total_words:,}</div>
+                <div class="gm-metric-label">Kelime</div>
+            </div>""", unsafe_allow_html=True)
+        with dc3:
+            st.markdown(f"""
+            <div class="gm-metric">
+                <div class="gm-metric-value">{len(proposal.sections)}</div>
+                <div class="gm-metric-label">Bölüm</div>
+            </div>""", unsafe_allow_html=True)
+        with dc4:
+            st.markdown(f"""
+            <div class="gm-metric">
+                <div class="gm-metric-value">{len(proposal.trl_mentions)}</div>
+                <div class="gm-metric-label">TRL Ref</div>
+            </div>""", unsafe_allow_html=True)
+
         for s, d in proposal.sections.items():
-            st.write(f"- {s.value}: {d.word_count} kelime")
+            st.write(f"- **{s.value}**: {d.word_count} kelime (sayfa {d.page_start}-{d.page_end})")
         for w in proposal.warnings:
             st.warning(w)
 
     # ── AI CALL MATCHING ──
-    st.markdown("### 🎯 Otomatik Çağrı Eşleştirme")
+    st.markdown("""
+    <div class="gm-section-header">
+        <span class="gm-section-icon">🎯</span>
+        <h2>Otomatik Çağrı Eşleştirme</h2>
+    </div>
+    """, unsafe_allow_html=True)
 
     match_col1, match_col2 = st.columns([1, 1])
     with match_col1:
-        use_ai_match = st.checkbox(
-            "🧠 AI ile eşleştir (daha doğru, ~10s)", value=True
-        )
+        use_ai_match = st.checkbox("🧠 AI ile eşleştir (daha doğru, ~10s)", value=True)
     with match_col2:
         match_btn = st.button("🔍 Çağrı Eşleştir", use_container_width=True)
 
@@ -1022,27 +1661,40 @@ def render_evaluation_page():
     if matches:
         for i, m in enumerate(matches):
             score = m.get("ai_match_score", 0)
-            score_color = "🟢" if score >= 70 else "🟡" if score >= 40 else "🔴"
+            if score >= 70:
+                match_badge = "gm-match-high"
+                score_icon = "🟢"
+            elif score >= 40:
+                match_badge = "gm-match-medium"
+                score_icon = "🟡"
+            else:
+                match_badge = "gm-match-low"
+                score_icon = "🔴"
 
             with st.expander(
-                f"{score_color} {m['call_id']} — Uyum: {score}/100 | "
+                f"{score_icon} {m['call_id']} — Uyum: {score}/100 | "
                 f"{', '.join(m.get('action_types', []))}",
                 expanded=(i == 0),
             ):
-                st.markdown(
-                    f"**{m.get('destination', m.get('call_id', ''))}**"
-                )
-                st.markdown(f"📝 {m.get('ai_match_reason', '')}")
-                st.markdown(
-                    f"🏷️ Önerilen aksiyon: **{m.get('suggested_action_type', '?')}**"
-                )
-                st.markdown(f"💰 Bütçe/proje: {m.get('budget_per_project', 'N/A')}")
-                st.markdown(f"📅 Son tarih: {m.get('deadline', 'N/A')}")
+                st.markdown(f"""
+                <div class="gm-card" style="margin-bottom:1rem;">
+                    <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:0.8rem;">
+                        <h4 style="margin:0;color:#1e293b;">{m.get('destination', m.get('call_id', ''))}</h4>
+                        <span class="{match_badge}">Uyum: {score}/100</span>
+                    </div>
+                    <p style="color:#64748b;font-size:0.9rem;margin:0.5rem 0;">📝 {m.get('ai_match_reason', '')}</p>
+                    <div style="display:grid;grid-template-columns:1fr 1fr;gap:0.5rem;margin-top:0.8rem;">
+                        <div><strong style="color:#64748b;font-size:0.8rem;">🏷️ Aksiyon:</strong> {m.get('suggested_action_type', '?')}</div>
+                        <div><strong style="color:#64748b;font-size:0.8rem;">💰 Bütçe:</strong> {m.get('budget_per_project', 'N/A')}</div>
+                        <div><strong style="color:#64748b;font-size:0.8rem;">📅 Son Tarih:</strong> {m.get('deadline', 'N/A')}</div>
+                        <div><strong style="color:#64748b;font-size:0.8rem;">📊 Durum:</strong> {m.get('status', 'N/A')}</div>
+                    </div>
+                </div>
+                """, unsafe_allow_html=True)
 
-                st.markdown(
-                    f"**Beklenen Çıktılar:** {m.get('expected_outcomes', 'N/A')}"
-                )
-                st.markdown(f"**Kapsam:** {m.get('scope', 'N/A')}")
+                with st.expander("📋 Detaylar"):
+                    st.markdown(f"**Beklenen Çıktılar:** {m.get('expected_outcomes', 'N/A')}")
+                    st.markdown(f"**Kapsam:** {m.get('scope', 'N/A')}")
 
                 if st.button(f"✅ Bu çağrıyı kullan", key=f"use_match_{i}"):
                     call_ctx_text_auto = build_call_eval_context(m)
@@ -1050,22 +1702,16 @@ def render_evaluation_page():
                     suggested = m.get("suggested_action_type", "")
                     if suggested:
                         try:
-                            st.session_state["auto_action_type"] = (
-                                get_action_type_from_string(suggested)
-                            )
+                            st.session_state["auto_action_type"] = get_action_type_from_string(suggested)
                         except Exception:
                             pass
-                    st.success(
-                        f"✅ {m['call_id']} bağlamı değerlendirmeye eklendi!"
-                    )
+                    st.success(f"✅ {m['call_id']} bağlamı değerlendirmeye eklendi!")
                     st.rerun()
     else:
-        st.info(
-            "Eşleşen çağrı bulunamadı. Manuel olarak çağrı bağlamı girebilirsiniz."
-        )
+        st.info("Eşleşen çağrı bulunamadı. Manuel olarak çağrı bağlamı girebilirsiniz.")
 
     # ── ELIGIBILITY ──
-    with st.spinner("✅ Uygunluk kontrolleri..."):
+    with st.spinner("✅ Uygunluk kontrolleri çalıştırılıyor..."):
         elig = run_eligibility_checks(proposal, action)
     render_eligibility(elig)
 
@@ -1075,9 +1721,7 @@ def render_evaluation_page():
             proposal.full_text, proposal.partner_names, proposal.person_names
         )
         rpt = generate_deidentification_report(sigs)
-        with st.expander(
-            f"🔒 Kimlik Taraması ({len(sigs)} sinyal)", expanded=len(sigs) > 0
-        ):
+        with st.expander(f"🔒 Kimlik Taraması ({len(sigs)} sinyal)", expanded=len(sigs) > 0):
             st.markdown(rpt)
 
     # ── BUILD CALL CONTEXT (combine all sources) ──
@@ -1095,25 +1739,24 @@ def render_evaluation_page():
 
     # From manual input
     if manual_ctx:
-        call_ctx_text = (
-            (call_ctx_text + "\n\n" + manual_ctx) if call_ctx_text else manual_ctx
-        )
+        call_ctx_text = (call_ctx_text + "\n\n" + manual_ctx) if call_ctx_text else manual_ctx
 
     # ── EVALUATE ──
-    st.markdown("---")
-    st.markdown("## 🚀 Değerlendirme")
+    st.markdown("""
+    <div class="gm-section-header">
+        <span class="gm-section-icon">🚀</span>
+        <h2>Değerlendirme</h2>
+    </div>
+    """, unsafe_allow_html=True)
+
     n = len(cfg.criteria)
     c_b, c_i = st.columns([1, 2])
     with c_b:
-        go = st.button(
-            "🔬 Değerlendirmeyi Başlat", type="primary", use_container_width=True
-        )
+        go = st.button("🔬 Değerlendirmeyi Başlat", type="primary", use_container_width=True)
     with c_i:
-        ctx_note = " (çağrı bağlamı aktif)" if call_ctx_text else ""
-        rag_note = " + RAG" if use_ai_rag else ""
-        st.info(
-            f"{action.value}: {n} kriter{ctx_note}{rag_note} · ~{n * 30}-{n * 60}s"
-        )
+        ctx_note = " + 📡 Çağrı bağlamı" if call_ctx_text else ""
+        rag_note = " + 🧠 RAG" if use_ai_rag else ""
+        st.info(f"**{action.value}**: {n} kriter{ctx_note}{rag_note} · Tahmini süre: ~{n * 30}-{n * 60}s")
 
     if not go:
         return
@@ -1124,7 +1767,7 @@ def render_evaluation_page():
     pbar = st.progress(0.0)
     status = st.empty()
     step = [0]
-    total = n * 3  # eval + rag + coaching per criterion
+    total = n * 3
 
     def on_p(msg):
         status.markdown(f"⏳ {msg}")
@@ -1133,7 +1776,7 @@ def render_evaluation_page():
 
     results = ev.run(proposal, action, call_ctx_text, on_p, use_ai_rag=use_ai_rag)
     pbar.progress(1.0)
-    status.markdown("✅ Tamamlandı!")
+    status.markdown("✅ Değerlendirme tamamlandı!")
     time.sleep(0.5)
     status.empty()
     pbar.empty()
@@ -1141,13 +1784,16 @@ def render_evaluation_page():
     # ── DISPLAY RESULTS ──
     st.markdown("---")
     render_overall(results)
-    st.markdown("---")
-    st.markdown("## 📝 Kriter Detayları")
+
+    st.markdown("""
+    <div class="gm-section-header">
+        <span class="gm-section-icon">📝</span>
+        <h2>Kriter Detayları</h2>
+    </div>
+    """, unsafe_allow_html=True)
 
     show_coach = mode in ("both", "coaching_only")
-    tab_names = [
-        c.get("criterion", f"K{i + 1}") for i, c in enumerate(results["criteria"])
-    ]
+    tab_names = [c.get("criterion", f"K{i + 1}") for i, c in enumerate(results["criteria"])]
     tabs = st.tabs(tab_names)
     for i, tab in enumerate(tabs):
         with tab:
@@ -1156,21 +1802,22 @@ def render_evaluation_page():
             render_criterion(cd, co, show_coach)
 
     # ── DOWNLOADS ──
-    st.markdown("---")
-    st.markdown("## 📥 İndir")
+    st.markdown("""
+    <div class="gm-section-header">
+        <span class="gm-section-icon">📥</span>
+        <h2>Raporları İndir</h2>
+    </div>
+    """, unsafe_allow_html=True)
+
     d1, d2, d3 = st.columns(3)
     elig_dicts = [
-        {
-            "check_name": ch.check_name,
-            "status": ch.status.value,
-            "message": ch.message,
-        }
+        {"check_name": ch.check_name, "status": ch.status.value, "message": ch.message}
         for ch in elig.results
     ]
 
     with d1:
         st.download_button(
-            "📊 JSON",
+            "📊 JSON Rapor",
             json.dumps(results, indent=2, ensure_ascii=False),
             f"grantmirror_{fn}.json",
             "application/json",
@@ -1178,7 +1825,7 @@ def render_evaluation_page():
         )
     with d2:
         st.download_button(
-            "📋 ESR (MD)",
+            "📋 ESR Rapor (MD)",
             generate_esr_report(results, elig_dicts),
             f"grantmirror_{fn}_esr.md",
             "text/markdown",
@@ -1186,7 +1833,7 @@ def render_evaluation_page():
         )
     with d3:
         st.download_button(
-            "🎯 Koçluk (MD)",
+            "🎯 Koçluk Rapor (MD)",
             generate_coaching_report(results),
             f"grantmirror_{fn}_coach.md",
             "text/markdown",
@@ -1210,24 +1857,17 @@ def render_evaluation_page():
 
         st.markdown("### Eşleşen Çağrı")
         if matches:
-            st.json(
-                {
-                    "top_match": matches[0].get("call_id", "?"),
-                    "match_score": matches[0].get("ai_match_score", 0),
-                    "action_type": matches[0].get("suggested_action_type", "?"),
-                }
-            )
+            st.json({
+                "top_match": matches[0].get("call_id", "?"),
+                "match_score": matches[0].get("ai_match_score", 0),
+                "action_type": matches[0].get("suggested_action_type", "?"),
+            })
         else:
             st.write("Eşleşme yok")
 
         st.markdown("### Çağrı Bağlamı")
         if call_ctx_text:
-            st.text_area(
-                "Context gönderilen",
-                call_ctx_text[:1000],
-                height=150,
-                disabled=True,
-            )
+            st.text_area("Context gönderilen", call_ctx_text[:1000], height=150, disabled=True)
         else:
             st.write("Bağlam yok")
 
@@ -1239,18 +1879,17 @@ def render_evaluation_page():
             )
 
         st.markdown("### Funding Probability Detay")
-        fp = results.get("funding_probability_pct", 0)
-        tw = results.get("total_weighted", 0)
-        tm = results.get("total_max", 0)
-        st.write(
-            f"Score ratio: {tw}/{tm} = {tw / tm * 100:.1f}%" if tm > 0 else "N/A"
-        )
-        st.write(f"Funding probability: {fp}%")
-        st.progress(fp / 100)
+        fp_dbg = results.get("funding_probability_pct", 0)
+        tw_dbg = results.get("total_weighted", 0)
+        tm_dbg = results.get("total_max", 0)
+        st.write(f"Score ratio: {tw_dbg}/{tm_dbg} = {tw_dbg / tm_dbg * 100:.1f}%" if tm_dbg > 0 else "N/A")
+        st.write(f"Funding probability: {fp_dbg}%")
+        st.progress(fp_dbg / 100)
 
-        st.markdown("### RAG Ayarları")
+        st.markdown("### AI Ayarları")
         st.write(f"AI RAG aktif: {use_ai_rag}")
         st.write(f"AI eşleştirme kullanıldı: {use_ai_match}")
+        st.write(f"Model: {MODEL_NAME}")
 
         st.markdown("### Ham Sonuçlar (JSON)")
         st.json(results)
