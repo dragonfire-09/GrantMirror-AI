@@ -1,7 +1,7 @@
 import re
 import io
-from dataclasses import dataclass, field
-from typing import Dict, List, Optional, Tuple
+from dataclasses import dataclass
+from typing import Dict, List, Optional
 from enum import Enum
 
 
@@ -51,125 +51,395 @@ class ParsedProposal:
 
 
 SECTION_PATTERNS = {
-    SectionType.EXCELLENCE: [r"(?i)^[\d\.]*\s*(?:section\s*)?1[\.\s]+excellence", r"(?i)^1\.\s+excellence", r"(?i)^[\d\.]*\s*excellence"],
-    SectionType.IMPACT: [r"(?i)^[\d\.]*\s*(?:section\s*)?2[\.\s]+impact", r"(?i)^2\.\s+impact", r"(?i)^[\d\.]*\s*impact"],
-    SectionType.IMPLEMENTATION: [r"(?i)^[\d\.]*\s*(?:section\s*)?3[\.\s]+(?:quality|implementation)", r"(?i)^3\.\s+(?:quality|implementation)"],
-    SectionType.OPEN_SCIENCE: [r"(?i)open\s+science\s+practices"],
-    SectionType.GENDER_DIMENSION: [r"(?i)gender\s+dimension"],
-    SectionType.DISSEMINATION: [r"(?i)dissemination\s+(?:and|&)\s+(?:exploitation|communication)"],
-    SectionType.EXPLOITATION: [r"(?i)exploitation\s+(?:plan|strategy)"],
-    SectionType.WORK_PACKAGES: [r"(?i)work\s+plan", r"(?i)work\s+packages?\s+(?:description|list)"],
-    SectionType.RISK_TABLE: [r"(?i)risk\s+(?:management|assessment|table)", r"(?i)critical\s+risks"],
-    SectionType.DELIVERABLES: [r"(?i)(?:list\s+of\s+)?deliverables"],
-    SectionType.MILESTONES: [r"(?i)(?:list\s+of\s+)?milestones"],
-    SectionType.ETHICS: [r"(?i)^ethics"],
-    SectionType.CONSORTIUM: [r"(?i)consortium", r"(?i)participants?\s+(?:description|list)"],
-    SectionType.ABSTRACT: [r"(?i)^abstract", r"(?i)^summary"],
-    SectionType.REFERENCES: [r"(?i)^references", r"(?i)^bibliography"],
+    SectionType.EXCELLENCE: [
+        r"(?i)^[\d\.]*\s*(?:section\s*)?1[\.\s]+excellence",
+        r"(?i)^1\.\s+excellence",
+        r"(?i)^[\d\.]*\s*excellence",
+    ],
+    SectionType.IMPACT: [
+        r"(?i)^[\d\.]*\s*(?:section\s*)?2[\.\s]+impact",
+        r"(?i)^2\.\s+impact",
+        r"(?i)^[\d\.]*\s*impact",
+    ],
+    SectionType.IMPLEMENTATION: [
+        r"(?i)^[\d\.]*\s*(?:section\s*)?3[\.\s]+(?:quality|implementation)",
+        r"(?i)^3\.\s+(?:quality|implementation)",
+        r"(?i)quality\s+and\s+efficiency\s+of\s+the\s+implementation",
+    ],
+    SectionType.OPEN_SCIENCE: [
+        r"(?i)open\s+science\s+practices",
+        r"(?i)open\s+science",
+    ],
+    SectionType.GENDER_DIMENSION: [
+        r"(?i)gender\s+dimension",
+        r"(?i)sex\s+and\s+gender",
+    ],
+    SectionType.DISSEMINATION: [
+        r"(?i)dissemination\s+(?:and|&)\s+(?:exploitation|communication)",
+        r"(?i)communication\s*,?\s+dissemination",
+    ],
+    SectionType.EXPLOITATION: [
+        r"(?i)exploitation\s+(?:plan|strategy)",
+        r"(?i)exploitation\s+of\s+results",
+    ],
+    SectionType.WORK_PACKAGES: [
+        r"(?i)work\s+plan",
+        r"(?i)work\s+packages?\s+(?:description|list)",
+        r"(?i)^work\s+package\s+\d+",
+    ],
+    SectionType.RISK_TABLE: [
+        r"(?i)risk\s+(?:management|assessment|table)",
+        r"(?i)critical\s+risks",
+    ],
+    SectionType.DELIVERABLES: [
+        r"(?i)(?:list\s+of\s+)?deliverables",
+        r"(?i)^deliverable\s+\d+",
+    ],
+    SectionType.MILESTONES: [
+        r"(?i)(?:list\s+of\s+)?milestones",
+        r"(?i)^milestone\s+\d+",
+    ],
+    SectionType.ETHICS: [
+        r"(?i)^ethics",
+        r"(?i)ethics\s+self[-\s]?assessment",
+    ],
+    SectionType.CONSORTIUM: [
+        r"(?i)consortium",
+        r"(?i)participants?\s+(?:description|list)",
+        r"(?i)capacity\s+of\s+participants",
+    ],
+    SectionType.ABSTRACT: [
+        r"(?i)^abstract",
+        r"(?i)^summary",
+        r"(?i)^project\s+summary",
+    ],
+    SectionType.REFERENCES: [
+        r"(?i)^references",
+        r"(?i)^bibliography",
+    ],
 }
 
 
 def _pdf_text(fb: bytes):
-    import fitz
+    """
+    Safely extract text from PDF bytes using PyMuPDF.
+
+    Important:
+    page_count is captured before doc.close().
+    This prevents: ValueError / RuntimeError: document closed
+    """
+
+    try:
+        import fitz
+    except ImportError as e:
+        raise ImportError(
+            "PyMuPDF paketi bulunamadı. requirements.txt içine PyMuPDF ekleyin."
+        ) from e
+
+    if not fb:
+        raise ValueError("PDF dosyası boş okunuyor.")
+
+    full_parts = []
+    page_texts = []
+
     doc = fitz.open(stream=fb, filetype="pdf")
-    full = ""
-    pts = []
-    for i in range(len(doc)):
-        t = doc[i].get_text("text")
-        pts.append((i + 1, t))
-        full += f"\n--- PAGE {i+1} ---\n{t}"
-    doc.close()
-    return full, len(doc), pts
+
+    try:
+        page_count = len(doc)
+
+        for i in range(page_count):
+            page = doc.load_page(i)
+            text = page.get_text("text") or ""
+
+            page_no = i + 1
+            page_texts.append((page_no, text))
+            full_parts.append(f"\n--- PAGE {page_no} ---\n{text}")
+
+    finally:
+        doc.close()
+
+    full_text = "\n".join(full_parts)
+
+    if not full_text.strip():
+        raise ValueError(
+            "PDF metni çıkarılamadı. Dosya taranmış görsel PDF olabilir; OCR gerekir."
+        )
+
+    return full_text, page_count, page_texts
 
 
 def _docx_text(fb: bytes):
-    from docx import Document
+    try:
+        from docx import Document
+    except ImportError as e:
+        raise ImportError(
+            "python-docx paketi bulunamadı. requirements.txt içine python-docx ekleyin."
+        ) from e
+
+    if not fb:
+        raise ValueError("DOCX dosyası boş okunuyor.")
+
     doc = Document(io.BytesIO(fb))
-    parts = [p.text for p in doc.paragraphs]
-    for tbl in doc.tables:
-        for row in tbl.rows:
-            parts.append(" | ".join(c.text.strip() for c in row.cells))
-    full = "\n".join(parts)
-    pages = max(1, len(full.split()) // 350)
-    return full, pages, [(1, full)]
+
+    parts = []
+
+    for paragraph in doc.paragraphs:
+        text = paragraph.text.strip()
+        if text:
+            parts.append(text)
+
+    for table in doc.tables:
+        for row in table.rows:
+            cells = [cell.text.strip() for cell in row.cells if cell.text.strip()]
+            if cells:
+                parts.append(" | ".join(cells))
+
+    full_text = "\n".join(parts)
+
+    if not full_text.strip():
+        raise ValueError("DOCX metni çıkarılamadı veya belge boş.")
+
+    pages = max(1, len(full_text.split()) // 350)
+
+    return full_text, pages, [(1, full_text)]
 
 
-def _detect(full_text):
-    secs = {}
+def _detect_sections(full_text: str) -> Dict[SectionType, ExtractedSection]:
+    sections: Dict[SectionType, ExtractedSection] = {}
+
     lines = full_text.split("\n")
-    cur_type = SectionType.UNKNOWN
-    cur_title = ""
-    cur_lines = []
-    cur_page = 1
+
+    current_type = SectionType.UNKNOWN
+    current_title = ""
+    current_lines = []
+    current_start_page = 1
+    current_page = 1
+
+    def flush_section(end_page: int):
+        nonlocal current_type, current_title, current_lines, current_start_page
+
+        if current_type == SectionType.UNKNOWN:
+            return
+
+        content = "\n".join(current_lines).strip()
+
+        if not content:
+            return
+
+        sections[current_type] = ExtractedSection(
+            section_type=current_type,
+            title=current_title,
+            content=content,
+            page_start=current_start_page,
+            page_end=end_page,
+            word_count=len(content.split()),
+        )
 
     for line in lines:
-        s = line.strip()
-        if not s:
-            cur_lines.append("")
-            continue
-        pm = re.match(r"--- PAGE (\d+) ---", s)
-        if pm:
-            cur_page = int(pm.group(1))
-            continue
-        found = False
-        for st, pats in SECTION_PATTERNS.items():
-            for p in pats:
-                if re.match(p, s):
-                    if cur_lines and cur_type != SectionType.UNKNOWN:
-                        txt = "\n".join(cur_lines)
-                        secs[cur_type] = ExtractedSection(cur_type, cur_title, txt, 1, cur_page, len(txt.split()))
-                    cur_type = st
-                    cur_title = s
-                    cur_lines = []
-                    found = True
-                    break
-            if found:
-                break
-        if not found:
-            cur_lines.append(s)
+        stripped = line.strip()
 
-    if cur_lines and cur_type != SectionType.UNKNOWN:
-        txt = "\n".join(cur_lines)
-        secs[cur_type] = ExtractedSection(cur_type, cur_title, txt, 1, cur_page, len(txt.split()))
-    return secs
+        page_match = re.match(r"--- PAGE (\d+) ---", stripped)
+        if page_match:
+            current_page = int(page_match.group(1))
+            continue
+
+        if not stripped:
+            current_lines.append("")
+            continue
+
+        matched_type = None
+
+        for section_type, patterns in SECTION_PATTERNS.items():
+            for pattern in patterns:
+                if re.match(pattern, stripped):
+                    matched_type = section_type
+                    break
+            if matched_type:
+                break
+
+        if matched_type:
+            flush_section(current_page)
+
+            current_type = matched_type
+            current_title = stripped
+            current_lines = []
+            current_start_page = current_page
+        else:
+            current_lines.append(stripped)
+
+    flush_section(current_page)
+
+    return sections
+
+
+def _extract_trl_mentions(full_text: str) -> List[Dict]:
+    trl_mentions = []
+
+    for match in re.finditer(
+        r"(?i)TRL\s*[\-:]?\s*(\d)\s*(?:to|->|–|-)\s*(?:TRL\s*)?(\d)",
+        full_text,
+    ):
+        trl_mentions.append(
+            {
+                "type": "range",
+                "start_trl": int(match.group(1)),
+                "end_trl": int(match.group(2)),
+                "raw": match.group(0),
+            }
+        )
+
+    if not trl_mentions:
+        for match in re.finditer(r"(?i)TRL\s*[\-:]?\s*(\d)", full_text):
+            trl_mentions.append(
+                {
+                    "type": "single",
+                    "trl": int(match.group(1)),
+                    "raw": match.group(0),
+                }
+            )
+
+    return trl_mentions
+
+
+def _extract_kpis(full_text: str) -> List[str]:
+    kpis = []
+
+    patterns = [
+        r"(?i)(?:KPI|key\s+performance\s+indicator)s?\s*[:\-]\s*([^\n]+)",
+        r"(?i)(?:indicator|metric)\s*[:\-]\s*([^\n]+)",
+    ]
+
+    for pattern in patterns:
+        for match in re.finditer(pattern, full_text):
+            value = match.group(0).strip()
+            if value and value not in kpis:
+                kpis.append(value)
+
+    return kpis[:50]
+
+
+def _extract_budget_figures(full_text: str) -> List[Dict]:
+    figures = []
+
+    patterns = [
+        r"(?i)(?:€|EUR)\s*([\d,\.]+)\s*(?:million|m|M)?",
+        r"(?i)([\d,\.]+)\s*(?:million|m|M)\s*(?:€|EUR)",
+    ]
+
+    for pattern in patterns:
+        for match in re.finditer(pattern, full_text):
+            figures.append(
+                {
+                    "raw": match.group(0),
+                    "value": match.group(1),
+                }
+            )
+
+    return figures[:100]
+
+
+def _extract_partner_names(full_text: str) -> List[str]:
+    patterns = [
+        r"\b[A-Z][A-Za-z&\-\s]+(?:University|Institute|Institut|Centre|Center|Foundation|Association|GmbH|Ltd|AG|BV|Oy|SAS|SL|SRL)\b",
+        r"\b(?:University|Institute|Institut|Centre|Center|Foundation|Association)\s+of\s+[A-Z][A-Za-z\-\s]+\b",
+    ]
+
+    partners = set()
+
+    for pattern in patterns:
+        for match in re.finditer(pattern, full_text):
+            candidate = re.sub(r"\s+", " ", match.group(0)).strip()
+            if 4 <= len(candidate) <= 120:
+                partners.add(candidate)
+
+    return sorted(partners)[:50]
+
+
+def _extract_person_names(full_text: str) -> List[str]:
+    persons = set()
+
+    for match in re.finditer(
+        r"(?:Prof\.|Dr\.|Mr\.|Ms\.|Mrs\.)\s+([A-Z][a-zA-Z\-]+\s+[A-Z][a-zA-Z\-]+)",
+        full_text,
+    ):
+        persons.add(match.group(1).strip())
+
+    return sorted(persons)[:50]
+
+
+def _extract_acronym(full_text: str) -> Optional[str]:
+    patterns = [
+        r"(?i)(?:acronym)\s*[:\-]\s*([A-Z][A-Z0-9\-]{2,20})",
+        r"(?i)(?:project\s+acronym)\s*[:\-]\s*([A-Z][A-Z0-9\-]{2,20})",
+        r"(?i)(?:proposal\s+acronym)\s*[:\-]\s*([A-Z][A-Z0-9\-]{2,20})",
+    ]
+
+    for pattern in patterns:
+        match = re.search(pattern, full_text)
+        if match:
+            return match.group(1)
+
+    return None
 
 
 def parse_proposal(file_bytes: bytes, filename: str) -> ParsedProposal:
     warnings = []
-    low = filename.lower()
-    if low.endswith(".pdf"):
-        full, pages, pts = _pdf_text(file_bytes)
-    elif low.endswith((".docx", ".doc")):
-        full, pages, pts = _docx_text(file_bytes)
+
+    if not filename:
+        raise ValueError("Dosya adı alınamadı.")
+
+    if not file_bytes:
+        raise ValueError("Dosya boş okunuyor.")
+
+    lower_name = filename.lower()
+
+    if lower_name.endswith(".pdf"):
+        full_text, pages, page_texts = _pdf_text(file_bytes)
+
+    elif lower_name.endswith((".docx", ".doc")):
+        full_text, pages, page_texts = _docx_text(file_bytes)
+
     else:
         raise ValueError(f"Desteklenmeyen format: {filename}")
 
-    words = len(full.split())
-    secs = _detect(full)
+    total_words = len(full_text.split())
+    sections = _detect_sections(full_text)
 
-    for exp in [SectionType.EXCELLENCE, SectionType.IMPACT, SectionType.IMPLEMENTATION]:
-        if exp not in secs:
-            warnings.append(f"'{exp.value}' bolumu tespit edilemedi.")
+    for expected in [
+        SectionType.EXCELLENCE,
+        SectionType.IMPACT,
+        SectionType.IMPLEMENTATION,
+    ]:
+        if expected not in sections:
+            warnings.append(f"'{expected.value}' bölümü tespit edilemedi.")
 
-    trl = []
-    for m in re.finditer(r"(?i)TRL\s*[\-:]?\s*(\d)\s*(?:to|->|–|-)\s*(?:TRL\s*)?(\d)", full):
-        trl.append({"type": "range", "start_trl": int(m.group(1)), "end_trl": int(m.group(2))})
-    if not trl:
-        for m in re.finditer(r"(?i)TRL\s*[\-:]?\s*(\d)", full):
-            trl.append({"type": "single", "trl": int(m.group(1))})
+    if total_words < 500:
+        warnings.append(
+            "Belge çok kısa görünüyor; tam Part B dosyası olmayabilir."
+        )
 
-    kpi = [m.group(0).strip() for m in re.finditer(r"(?i)(?:KPI|key\s+performance\s+indicator)s?\s*[:]\s*([^\n]+)", full)]
-    budget = [{"raw": m.group(0)} for m in re.finditer(r"(?i)(?:€|EUR)\s*([\d,\.]+)", full)]
-    partners = list(set(m.group(0).strip() for m in re.finditer(
-        r"(?:University|Institut[eo]?|Centre|Center|Foundation|GmbH|Ltd|AG)\s+\w+", full)))[:50]
-    persons = list(set(m.group(1) for m in re.finditer(
-        r"(?:Prof\.|Dr\.|Mr\.|Ms\.)\s+([A-Z][a-z]+\s+[A-Z][a-z]+)", full)))
-    acr_m = re.search(r"(?i)(?:acronym|project\s+title)\s*[:]\s*([A-Z][A-Za-z0-9\-]+)", full)
+    trl_mentions = _extract_trl_mentions(full_text)
+    kpi_mentions = _extract_kpis(full_text)
+    budget_figures = _extract_budget_figures(full_text)
+    partner_names = _extract_partner_names(full_text)
+    person_names = _extract_person_names(full_text)
+    acronym = _extract_acronym(full_text)
 
     return ParsedProposal(
-        full_text=full, sections=secs, total_pages=pages, total_words=words,
-        metadata={"filename": filename}, warnings=warnings,
-        partner_names=partners, person_names=persons,
-        trl_mentions=trl, kpi_mentions=kpi, budget_figures=budget,
-        acronym=acr_m.group(1) if acr_m else None,
+        full_text=full_text,
+        sections=sections,
+        total_pages=pages,
+        total_words=total_words,
+        metadata={
+            "filename": filename,
+            "parser": "document_parser_v2",
+            "page_text_count": str(len(page_texts)),
+        },
+        warnings=warnings,
+        partner_names=partner_names,
+        person_names=person_names,
+        trl_mentions=trl_mentions,
+        kpi_mentions=kpi_mentions,
+        budget_figures=budget_figures,
+        acronym=acronym,
     )
