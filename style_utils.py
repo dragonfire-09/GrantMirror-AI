@@ -443,8 +443,112 @@ def inject_modern_css():
     color: #667085;
     margin-bottom: 18px;
 }
-        
 
+.gm-onboarding {
+    display: grid;
+    grid-template-columns: 1.5fr 0.9fr;
+    gap: 24px;
+    background: linear-gradient(135deg, #ffffff 0%, #f8fbff 100%);
+    border: 1px solid #eaecf0;
+    border-radius: 30px;
+    padding: 32px;
+    box-shadow: 0 22px 60px rgba(16,24,40,0.08);
+    margin-bottom: 20px;
+}
+
+.gm-eyebrow {
+    display: inline-block;
+    color: #175cd3;
+    background: #eff4ff;
+    font-weight: 850;
+    font-size: 0.78rem;
+    padding: 7px 12px;
+    border-radius: 999px;
+    margin-bottom: 12px;
+}
+
+.gm-onboarding h2 {
+    font-size: 2rem;
+    letter-spacing: -0.04em;
+    margin: 0 0 10px 0;
+    color: #101828;
+}
+
+.gm-onboarding p {
+    color: #667085;
+    font-size: 1rem;
+    line-height: 1.55;
+    max-width: 720px;
+}
+
+.gm-onboarding-badges {
+    display: flex;
+    gap: 10px;
+    flex-wrap: wrap;
+    margin-top: 18px;
+}
+
+.gm-onboarding-badges span {
+    border: 1px solid #d0d5dd;
+    background: #ffffff;
+    color: #344054;
+    font-weight: 750;
+    font-size: 0.82rem;
+    padding: 8px 12px;
+    border-radius: 999px;
+}
+
+.gm-onboarding-steps {
+    display: grid;
+    gap: 12px;
+}
+
+.gm-step {
+    display: flex;
+    align-items: center;
+    gap: 12px;
+    background: #ffffff;
+    border: 1px solid #eaecf0;
+    border-radius: 18px;
+    padding: 16px;
+    box-shadow: 0 8px 22px rgba(16,24,40,0.04);
+}
+
+.gm-step b {
+    width: 34px;
+    height: 34px;
+    border-radius: 12px;
+    background: #175cd3;
+    color: #ffffff;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+}
+
+.gm-step span {
+    color: #344054;
+    font-weight: 750;
+}
+
+/* File uploader polish */
+[data-testid="stFileUploader"] {
+    background: #ffffff;
+    border: 1.5px dashed #b2ccff !important;
+    border-radius: 24px !important;
+    padding: 18px !important;
+    box-shadow: 0 10px 30px rgba(16,24,40,0.05);
+}
+
+[data-testid="stFileUploader"] section {
+    border: none !important;
+}
+
+@media (max-width: 900px) {
+    .gm-onboarding {
+        grid-template-columns: 1fr;
+    }
+}
+        
         /* ─────────────────────────────
            METRICS
         ───────────────────────────── */
