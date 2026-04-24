@@ -221,172 +221,239 @@ def fetch_horizon_calls(
     max_pages: int = 5,
 ) -> Tuple[List[Dict], dict]:
     """
-    EC Funding & Tenders API — POST metodu (GET 405 döndürüyor).
-    Birden fazla strateji dener, sayfalama yapar.
+    EC Funding & Tenders API — Çoklu endpoint + format denemesi.
     """
     calls = []
     debug_info = {
-        "method": "POST",
         "attempts": [],
         "success": False,
         "total_api": 0,
         "pages_fetched": 0,
     }
 
-    post_headers = {
-        "Content-Type": "application/json",
-        "Accept": "application/json",
-    }
-
-    # Status filtresi
-    status_query = ""
-    if status:
-        status_map = {
-            "open": "31094501",
-            "forthcoming": "31094502",
-            "closed": "31094503",
+    # ─── Strateji 1: Yeni REST endpoint (POST JSON) ───
+    try:
+        url1 = "https://api.tech.ec.europa.eu/search-api/prod/rest/search"
+        body1 = {
+            "apiKey": "SEDIA",
+            "text": search_text if search_text else "*",
+            "pageSize": min(max_results, 100),
+            "pageNumber": 1,
+            "sort": "deadlineDate:desc",
+            "query": {
+                "bool": {
+                    "must": [
+                        {"term": {"programmePeriod": "2021-2027"}},
+                        {"term": {"frameworkProgramme": "43108390"}},
+                    ]
+                }
+            },
         }
-        sc = status_map.get(status.lower(), "")
-        if sc:
-            status_query = f" AND status/code='{sc}'"
+        if status:
+            sm = {"open": "31094501", "forthcoming": "31094502", "closed": "31094503"}
+            sc = sm.get(status.lower(), "")
+            if sc:
+                body1["query"]["bool"]["must"].append({"term": {"status": sc}})
 
-    strategies = [
-        {
-            "name": "post_framework_period",
-            "body": {
+        resp1 = requests.post(
+            url1,
+            headers={"Content-Type": "application/json", "Accept": "application/json"},
+            json=body1,
+            timeout=25,
+        )
+        debug_info["attempts"].append({
+            "strategy": "rest_post_json_query",
+            "url": url1,
+            "status": resp1.status_code,
+            "body_type": "json_bool_query",
+        })
+        if resp1.status_code == 200:
+            data = resp1.json()
+            for r in data.get("results", []):
+                c = _parse_ec_result(r.get("metadata", {}))
+                if c:
+                    calls.append(c)
+            debug_info["attempts"][-1]["count"] = len(calls)
+    except Exception as e:
+        debug_info["attempts"].append({"strategy": "rest_post_json_query", "error": str(e)[:200]})
+
+    # ─── Strateji 2: Eski string query POST ───
+    if not calls:
+        try:
+            url2 = "https://api.tech.ec.europa.eu/search-api/prod/rest/search"
+            # String olarak query gönder
+            params_str = (
+                f"apiKey=SEDIA"
+                f"&text={'horizon ' + search_text if search_text else '*'}"
+                f"&pageSize={min(max_results, 100)}"
+                f"&pageNumber=1"
+                f"&query=programmePeriod%2Fcode%3D%272021-2027%27%20AND%20frameworkProgramme%2Fcode%3D%2743108390%27"
+            )
+            resp2 = requests.post(
+                f"{url2}?{params_str}",
+                headers={"Accept": "application/json"},
+                timeout=25,
+            )
+            debug_info["attempts"].append({
+                "strategy": "rest_post_query_string",
+                "status": resp2.status_code,
+            })
+            if resp2.status_code == 200:
+                data = resp2.json()
+                for r in data.get("results", []):
+                    c = _parse_ec_result(r.get("metadata", {}))
+                    if c:
+                        calls.append(c)
+                debug_info["attempts"][-1]["count"] = len(calls)
+        except Exception as e:
+            debug_info["attempts"].append({"strategy": "rest_post_query_string", "error": str(e)[:200]})
+
+    # ─── Strateji 3: Funding & Tenders Portal API (farklı endpoint) ───
+    if not calls:
+        try:
+            url3 = (
+                "https://ec.europa.eu/info/funding-tenders/opportunities/"
+                "data/topicSearch/search.json"
+            )
+            params3 = {
+                "callStatus": status.upper() if status else "OPEN,FORTHCOMING",
+                "frameworkProgramme": "HORIZON",
+                "pageSize": str(min(max_results, 100)),
+                "pageNumber": "0",
+                "sortBy": "deadlineDate",
+                "orderBy": "desc",
+            }
+            if search_text:
+                params3["keywords"] = search_text
+
+            resp3 = requests.get(
+                url3,
+                params=params3,
+                headers={
+                    "Accept": "application/json",
+                    "User-Agent": "GrantMirror-AI/1.0",
+                },
+                timeout=25,
+            )
+            debug_info["attempts"].append({
+                "strategy": "portal_topic_search",
+                "url": url3,
+                "status": resp3.status_code,
+            })
+            if resp3.status_code == 200:
+                data = resp3.json()
+                topics = data.get("topicResults", data.get("results", []))
+                if isinstance(topics, dict):
+                    topics = topics.get("content", topics.get("topics", []))
+
+                for t in topics:
+                    call = _parse_portal_topic(t)
+                    if call:
+                        calls.append(call)
+                debug_info["attempts"][-1]["count"] = len(calls)
+        except Exception as e:
+            debug_info["attempts"].append({"strategy": "portal_topic_search", "error": str(e)[:200]})
+
+    # ─── Strateji 4: Funding & Tenders OpenData API ───
+    if not calls:
+        try:
+            url4 = (
+                "https://api.tech.ec.europa.eu/search-api/prod/rest/search"
+            )
+            # Form-encoded POST
+            form_data = {
                 "apiKey": "SEDIA",
                 "text": search_text if search_text else "*",
-                "pageSize": 100,
-                "pageNumber": 1,
-                "sortBy": "deadlineDate:desc",
+                "pageSize": str(min(max_results, 100)),
+                "pageNumber": "1",
                 "query": (
                     "programmePeriod/code='2021-2027' AND "
                     "frameworkProgramme/code='43108390'"
-                    f"{status_query}"
                 ),
-            },
-        },
-        {
-            "name": "post_framework_only",
-            "body": {
-                "apiKey": "SEDIA",
-                "text": search_text if search_text else "*",
-                "pageSize": 100,
-                "pageNumber": 1,
-                "sortBy": "deadlineDate:desc",
-                "query": (
-                    f"frameworkProgramme/code='43108390'"
-                    f"{status_query}"
-                ),
-            },
-        },
-        {
-            "name": "post_horizon_text",
-            "body": {
-                "apiKey": "SEDIA",
-                "text": f"HORIZON {search_text}".strip() if search_text else "HORIZON",
-                "pageSize": 100,
-                "pageNumber": 1,
-                "sortBy": "deadlineDate:desc",
-            },
-        },
-    ]
-
-    for strategy in strategies:
-        try:
-            body = strategy["body"].copy()
-
-            # POST dene
-            resp = requests.post(
-                EC_SEARCH_URL,
-                headers=post_headers,
-                json=body,
+            }
+            resp4 = requests.post(
+                url4,
+                data=form_data,
+                headers={"Accept": "application/json"},
                 timeout=25,
             )
-
-            attempt = {
-                "strategy": strategy["name"],
-                "post_status": resp.status_code,
-            }
-
-            # POST başarısızsa GET dene
-            if resp.status_code != 200:
-                resp = requests.get(
-                    EC_SEARCH_URL,
-                    params={k: str(v) for k, v in body.items()},
-                    timeout=25,
-                )
-                attempt["get_fallback"] = True
-                attempt["get_status"] = resp.status_code
-
-                if resp.status_code != 200:
-                    debug_info["attempts"].append(attempt)
-                    continue
-
-            data = resp.json()
-            total_results = data.get("totalResults", 0)
-            results = data.get("results", [])
-
-            attempt["total_results"] = total_results
-            attempt["page1_count"] = len(results)
-            debug_info["attempts"].append(attempt)
-
-            if not results:
-                continue
-
-            # Sayfa 1
-            for r in results:
-                call = _parse_ec_result(r.get("metadata", {}))
-                if call:
-                    calls.append(call)
-            debug_info["pages_fetched"] = 1
-
-            # Sayfalama
-            if total_results > len(results):
-                pages = min(max_pages, (min(total_results, max_results) + 99) // 100)
-                for pg in range(2, pages + 1):
-                    try:
-                        body["pageNumber"] = pg
-
-                        rp = requests.post(
-                            EC_SEARCH_URL,
-                            headers=post_headers,
-                            json=body,
-                            timeout=25,
-                        )
-                        if rp.status_code != 200:
-                            rp = requests.get(
-                                EC_SEARCH_URL,
-                                params={k: str(v) for k, v in body.items()},
-                                timeout=25,
-                            )
-                        if rp.status_code == 200:
-                            for r2 in rp.json().get("results", []):
-                                c2 = _parse_ec_result(r2.get("metadata", {}))
-                                if c2:
-                                    calls.append(c2)
-                            debug_info["pages_fetched"] = pg
-
-                        if len(calls) >= max_results:
-                            break
-                        time.sleep(0.3)
-                    except Exception:
-                        break
-
-            if calls:
-                debug_info["success"] = True
-                debug_info["winning_strategy"] = strategy["name"]
-                break
-
-        except Exception as e:
             debug_info["attempts"].append({
-                "strategy": strategy["name"],
-                "error": str(e)[:200],
+                "strategy": "rest_post_form_encoded",
+                "status": resp4.status_code,
             })
-            continue
+            if resp4.status_code == 200:
+                data = resp4.json()
+                for r in data.get("results", []):
+                    c = _parse_ec_result(r.get("metadata", {}))
+                    if c:
+                        calls.append(c)
+                debug_info["attempts"][-1]["count"] = len(calls)
+        except Exception as e:
+            debug_info["attempts"].append({"strategy": "rest_post_form_encoded", "error": str(e)[:200]})
 
+    # ─── Strateji 5: CORDIS API ───
     if not calls:
-        debug_info["fallback"] = "no_results"
+        try:
+            url5 = "https://cordis.europa.eu/api/search"
+            params5 = {
+                "q": f"frameworkProgramme:HORIZON {search_text}".strip(),
+                "type": "project",
+                "format": "json",
+                "p": "1",
+                "num": str(min(max_results, 100)),
+            }
+            resp5 = requests.get(url5, params=params5, timeout=20)
+            debug_info["attempts"].append({
+                "strategy": "cordis_api",
+                "status": resp5.status_code,
+            })
+            if resp5.status_code == 200:
+                data = resp5.json()
+                results = data.get("payload", {}).get("results", [])
+                for r in results:
+                    c = _parse_cordis_result(r)
+                    if c:
+                        calls.append(c)
+                debug_info["attempts"][-1]["count"] = len(calls)
+        except Exception as e:
+            debug_info["attempts"].append({"strategy": "cordis_api", "error": str(e)[:200]})
+
+    # ─── Strateji 6: EC Open Data Portal ───
+    if not calls:
+        try:
+            url6 = (
+                "https://data.europa.eu/api/hub/search/datasets"
+                "?q=horizon+europe+calls"
+                "&limit=20"
+            )
+            resp6 = requests.get(url6, timeout=15)
+            debug_info["attempts"].append({
+                "strategy": "open_data_portal",
+                "status": resp6.status_code,
+            })
+        except Exception as e:
+            debug_info["attempts"].append({"strategy": "open_data_portal", "error": str(e)[:200]})
+
+    # ─── Strateji 7: Doğrudan HTML scrape (son çare) ───
+    if not calls:
+        try:
+            calls_from_scrape = _scrape_ec_portal(search_text, status, max_results)
+            calls.extend(calls_from_scrape)
+            debug_info["attempts"].append({
+                "strategy": "ec_portal_scrape",
+                "count": len(calls_from_scrape),
+            })
+        except Exception as e:
+            debug_info["attempts"].append({"strategy": "ec_portal_scrape", "error": str(e)[:200]})
+
+    # Sayfalama (çalışan strateji varsa)
+    if calls and len(calls) < max_results:
+        winning = next(
+            (a for a in debug_info["attempts"] if a.get("count", 0) > 0),
+            None,
+        )
+        if winning:
+            debug_info["pages_fetched"] = 1
 
     # Dedup
     seen = set()
@@ -401,9 +468,220 @@ def fetch_horizon_calls(
 
     debug_info["total_api"] = len(unique)
     debug_info["before_dedup"] = len(calls)
+    debug_info["success"] = len(unique) > 0
+    if unique:
+        winning_name = next(
+            (a["strategy"] for a in debug_info["attempts"] if a.get("count", 0) > 0),
+            "unknown",
+        )
+        debug_info["winning_strategy"] = winning_name
 
     return unique[:max_results], debug_info
 
+
+def _parse_portal_topic(topic: dict) -> Optional[Dict]:
+    """EC Portal topic search sonucunu parse et."""
+    try:
+        call_id = topic.get("identifier", topic.get("topicIdentifier", ""))
+        title = topic.get("title", topic.get("topicTitle", ""))
+        status = topic.get("callStatus", topic.get("status", "Open"))
+        deadline = topic.get("deadlineDate", topic.get("deadline", ""))
+        budget = topic.get("budgetOverall", topic.get("budget", ""))
+        desc = topic.get("description", topic.get("shortDescription", ""))
+        action_types = topic.get("typesOfAction", [])
+
+        if isinstance(action_types, str):
+            action_types = [action_types]
+
+        if not call_id and not title:
+            return None
+
+        # Status normalleştir
+        if isinstance(status, str):
+            status = _normalize_status(status)
+
+        # Deadline normalleştir
+        if deadline:
+            dm = re.search(r'(\d{4}-\d{2}-\d{2})', str(deadline))
+            if dm:
+                deadline = dm.group(1)
+            else:
+                deadline = str(deadline)[:10]
+
+        link = ""
+        if call_id:
+            clean_id = str(call_id).split(",")[0].strip()
+            link = (
+                f"https://ec.europa.eu/info/funding-tenders/"
+                f"opportunities/portal/screen/opportunities/"
+                f"topic-details/{clean_id}"
+            )
+
+        return {
+            "call_id": str(call_id) or "N/A",
+            "title": clean_html(str(title)) or str(call_id) or "N/A",
+            "status": status,
+            "deadline": deadline if deadline else "N/A",
+            "start_date": "",
+            "budget_total": str(budget) if budget else "",
+            "budget_per_project": "",
+            "action_types": action_types if action_types else ["RIA"],
+            "description": clean_html(str(desc))[:500],
+            "keywords": [],
+            "destination": "",
+            "scope": clean_html(str(desc))[:1000],
+            "expected_outcomes": "",
+            "link": link,
+            "source": "EC Portal",
+            "topics": [{"topic_id": str(call_id)}] if call_id else [],
+        }
+    except Exception:
+        return None
+
+
+def _parse_cordis_result(result: dict) -> Optional[Dict]:
+    """CORDIS API sonucunu parse et."""
+    try:
+        title = result.get("title", "")
+        acronym = result.get("acronym", "")
+        call_id = result.get("callIdentifier", result.get("id", ""))
+        status = result.get("status", "Open")
+        start_date = result.get("startDate", "")
+        end_date = result.get("endDate", "")
+
+        if not title:
+            return None
+
+        return {
+            "call_id": str(call_id) or f"CORDIS-{hashlib.md5(title.encode()).hexdigest()[:8]}",
+            "title": clean_html(f"{acronym}: {title}" if acronym else title),
+            "status": _normalize_status(str(status)),
+            "deadline": end_date[:10] if end_date else "N/A",
+            "start_date": start_date[:10] if start_date else "",
+            "budget_total": "",
+            "budget_per_project": "",
+            "action_types": ["RIA"],
+            "description": clean_html(result.get("objective", ""))[:500],
+            "keywords": [],
+            "destination": "",
+            "scope": clean_html(result.get("objective", ""))[:1000],
+            "expected_outcomes": "",
+            "link": f"https://cordis.europa.eu/project/id/{call_id}" if call_id else "",
+            "source": "CORDIS",
+            "topics": [],
+        }
+    except Exception:
+        return None
+
+
+def _scrape_ec_portal(
+    search_text: str = "",
+    status: str = "",
+    max_results: int = 50,
+) -> List[Dict]:
+    """EC F&T Portal'ı doğrudan scrape et (son çare)."""
+    if not HAS_BS4:
+        return []
+
+    calls = []
+    try:
+        url = (
+            "https://ec.europa.eu/info/funding-tenders/opportunities/"
+            "portal/screen/opportunities/topic-search"
+        )
+        params = {
+            "programmePart": "HORIZON",
+            "callStatus": status.upper() if status else "OPEN,FORTHCOMING",
+        }
+        if search_text:
+            params["keywords"] = search_text
+
+        headers = {
+            "User-Agent": (
+                "Mozilla/5.0 (Windows NT 10.0; Win64; x64) "
+                "AppleWebKit/537.36 Chrome/120.0 Safari/537.36"
+            ),
+            "Accept": "text/html,application/json",
+        }
+
+        resp = requests.get(url, params=params, headers=headers, timeout=25)
+        if resp.status_code != 200:
+            return []
+
+        # JSON yanıt mı kontrol et
+        try:
+            data = resp.json()
+            topics = (
+                data.get("topicResults", {}).get("content", [])
+                if isinstance(data.get("topicResults"), dict)
+                else data.get("results", [])
+            )
+            for t in topics[:max_results]:
+                call = _parse_portal_topic(t)
+                if call:
+                    calls.append(call)
+            return calls
+        except (ValueError, KeyError):
+            pass
+
+        # HTML yanıtsa scrape et
+        soup = BeautifulSoup(resp.text, "html.parser")
+        seen = set()
+        for el in soup.find_all(["div", "tr", "article"]):
+            text = el.get_text(separator=" ", strip=True)
+            if len(text) < 20:
+                continue
+            if not re.search(r'HORIZON|ERC|EIC|MSCA', text, re.IGNORECASE):
+                continue
+
+            title = ""
+            for h in el.find_all(["h3", "h4", "a", "strong"]):
+                t = clean_html(h.get_text(strip=True))
+                if len(t) >= 10:
+                    title = t
+                    break
+            if not title or title.lower()[:40] in seen:
+                continue
+            seen.add(title.lower()[:40])
+
+            link = ""
+            a = el.find("a", href=True)
+            if a:
+                link = a.get("href", "")
+                if link and not link.startswith("http"):
+                    link = f"https://ec.europa.eu{link}"
+
+            deadline = "N/A"
+            dm = re.search(r'(\d{4}-\d{2}-\d{2})', text)
+            if dm:
+                deadline = dm.group(1)
+
+            calls.append({
+                "call_id": f"EC-{hashlib.md5(title.encode()).hexdigest()[:8]}",
+                "title": title,
+                "status": "Open",
+                "deadline": deadline,
+                "start_date": "",
+                "budget_total": "",
+                "budget_per_project": "",
+                "action_types": _detect_action_types_from_text("", title),
+                "description": clean_html(text)[:500],
+                "keywords": [],
+                "destination": "",
+                "scope": clean_html(text)[:1000],
+                "expected_outcomes": "",
+                "link": link,
+                "source": "EC Scrape",
+                "topics": [],
+            })
+
+            if len(calls) >= max_results:
+                break
+
+    except Exception:
+        pass
+
+    return calls
 
 # ═══════════════════════════════════════════════════════════
 # TOPIC DETAILS
