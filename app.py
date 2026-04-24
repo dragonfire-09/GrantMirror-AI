@@ -17,7 +17,6 @@ from eligibility_checker import run_eligibility_checks, CheckStatus, Eligibility
 from knowledge_base import HorizonKnowledgeBase
 from deidentifier import scan_for_identity_signals, generate_deidentification_report
 from report_generator import generate_esr_report, generate_coaching_report
-
 # ═══════════════════════════════════════════════════════════
 # PAGE CONFIG
 # ═══════════════════════════════════════════════════════════
