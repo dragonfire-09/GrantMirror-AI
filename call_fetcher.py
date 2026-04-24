@@ -124,62 +124,77 @@ def _extract_ec_list(metadata: dict, *field_names) -> List[str]:
 def fetch_horizon_calls(
     search_text: str = "",
     status: str = "",
-    max_results: int = 100,
+    max_results: int = 500,
+    max_pages: int = 5,
 ) -> Tuple[List[Dict], dict]:
     """
     EC Funding & Tenders API'den Horizon Europe çağrılarını çek.
-    Birden fazla sorgu stratejisi dener.
+    POST metodu kullanır (GET artık 405 döndürüyor).
     """
     calls = []
-    debug_info = {"attempts": [], "success": False, "total_api": 0}
+    debug_info = {
+        "method": "POST",
+        "attempts": [],
+        "success": False,
+        "total_api": 0,
+        "pages_fetched": 0,
+    }
 
-    # Strateji 1: Yeni API formatı
+    headers = {
+        "Content-Type": "application/json",
+        "Accept": "application/json",
+    }
+
+    # Status filtresi
+    status_query = ""
+    if status:
+        status_map = {
+            "open": "31094501",
+            "forthcoming": "31094502",
+            "closed": "31094503",
+        }
+        sc = status_map.get(status.lower(), "")
+        if sc:
+            status_query = f" AND status/code='{sc}'"
+
+    # POST stratejileri (sırasıyla dener, ilk çalışan kazanır)
     strategies = [
         {
-            "name": "strategy_1_framework",
-            "params": {
-                "apiKey": "SEDIA",
-                "text": search_text if search_text else "horizon europe",
-                "pageSize": str(min(max_results, 100)),
-                "pageNumber": "1",
-                "type": "1",
-                "sortBy": "sortStatus:asc,deadlineDate:desc",
-            },
-        },
-        {
-            "name": "strategy_2_query",
-            "params": {
+            "name": "post_framework_query",
+            "body": {
                 "apiKey": "SEDIA",
                 "text": search_text if search_text else "*",
-                "pageSize": str(min(max_results, 100)),
-                "pageNumber": "1",
-                "sortBy": "deadlineDate:desc",
-                "query": (
-                    "frameworkProgramme/code='43108390'"
-                ),
-            },
-        },
-        {
-            "name": "strategy_3_programme_period",
-            "params": {
-                "apiKey": "SEDIA",
-                "text": search_text if search_text else "*",
-                "pageSize": str(min(max_results, 100)),
-                "pageNumber": "1",
+                "pageSize": 100,
+                "pageNumber": 1,
                 "sortBy": "deadlineDate:desc",
                 "query": (
                     "programmePeriod/code='2021-2027' AND "
                     "frameworkProgramme/code='43108390'"
+                    f"{status_query}"
                 ),
             },
         },
         {
-            "name": "strategy_4_simple",
-            "params": {
+            "name": "post_framework_only",
+            "body": {
                 "apiKey": "SEDIA",
-                "text": "HORIZON" if not search_text else f"HORIZON {search_text}",
-                "pageSize": str(min(max_results, 100)),
-                "pageNumber": "1",
+                "text": search_text if search_text else "*",
+                "pageSize": 100,
+                "pageNumber": 1,
+                "sortBy": "deadlineDate:desc",
+                "query": (
+                    f"frameworkProgramme/code='43108390'"
+                    f"{status_query}"
+                ),
+            },
+        },
+        {
+            "name": "post_horizon_text",
+            "body": {
+                "apiKey": "SEDIA",
+                "text": f"HORIZON {search_text}".strip() if search_text else "HORIZON",
+                "pageSize": 100,
+                "pageNumber": 1,
                 "sortBy": "deadlineDate:desc",
             },
         },
@@ -187,37 +202,134 @@ def fetch_horizon_calls(
 
     for strategy in strategies:
         try:
-            params = strategy["params"].copy()
+            body = strategy["body"].copy()
 
-            # Status filtresi
-            if status:
-                status_map = {
-                    "open": "31094501",
-                    "forthcoming": "31094502",
-                    "closed": "31094503",
-                }
-                sc = status_map.get(status.lower(), "")
-                if sc:
-                    q = params.get("query", "")
-                    status_q = f"status/code='{sc}'"
-                    params["query"] = f"{q} AND {status_q}" if q else status_q
+            # İlk sayfa dene
+            resp = requests.post(
+                EC_SEARCH_URL,
+                headers=headers,
+                json=body,
+                timeout=25,
+            )
 
-            resp = requests.get(EC_SEARCH_URL, params=params, timeout=25)
-            debug_info["attempts"].append({
+            attempt_info = {
                 "strategy": strategy["name"],
                 "status_code": resp.status_code,
-                "url": resp.url[:200],
-            })
+                "method": "POST",
+            }
 
             if resp.status_code != 200:
-                continue
+                # POST başarısızsa GET dene (fallback)
+                resp = requests.get(
+                    EC_SEARCH_URL,
+                    params={k: str(v) for k, v in body.items()},
+                    timeout=25,
+                )
+                attempt_info["fallback_get"] = True
+                attempt_info["get_status_code"] = resp.status_code
+
+                if resp.status_code != 200:
+                    debug_info["attempts"].append(attempt_info)
+                    continue
 
             data = resp.json()
-            results = data.get("results", [])
             total_results = data.get("totalResults", 0)
+            results = data.get("results", [])
 
-            debug_info["attempts"][-1]["total_results"] = total_results
-            debug_info["attempts"][-1]["returned"] = len(results)
+            attempt_info["total_results"] = total_results
+            attempt_info["page1_returned"] = len(results)
+            debug_info["attempts"].append(attempt_info)
+
+            if not results:
+                continue
+
+            # Sayfa 1 sonuçlarını parse et
+            for r in results:
+                meta = r.get("metadata", {})
+                call = _parse_ec_result(meta)
+                if call:
+                    calls.append(call)
+
+            debug_info["pages_fetched"] = 1
+
+            # Sayfalama — daha fazla sonuç varsa
+            if total_results > len(results):
+                pages_needed = min(
+                    max_pages,
+                    (min(total_results, max_results) + 99) // 100,
+                )
+
+                for page in range(2, pages_needed + 1):
+                    try:
+                        body["pageNumber"] = page
+                        resp_p = requests.post(
+                            EC_SEARCH_URL,
+                            headers=headers,
+                            json=body,
+                            timeout=25,
+                        )
+
+                        if resp_p.status_code != 200:
+                            # GET fallback
+                            resp_p = requests.get(
+                                EC_SEARCH_URL,
+                                params={k: str(v) for k, v in body.items()},
+                                timeout=25,
+                            )
+
+                        if resp_p.status_code == 200:
+                            data_p = resp_p.json()
+                            results_p = data_p.get("results", [])
+                            for r_p in results_p:
+                                call_p = _parse_ec_result(
+                                    r_p.get("metadata", {})
+                                )
+                                if call_p:
+                                    calls.append(call_p)
+                            debug_info["pages_fetched"] = page
+
+                        if len(calls) >= max_results:
+                            break
+
+                        # Rate limit koruması
+                        time.sleep(0.3)
+
+                    except Exception:
+                        break
+
+            # Bu strateji çalıştı, dur
+            if calls:
+                debug_info["success"] = True
+                debug_info["total_api"] = len(calls)
+                debug_info["winning_strategy"] = strategy["name"]
+                break
+
+        except Exception as e:
+            debug_info["attempts"].append({
+                "strategy": strategy["name"],
+                "error": str(e)[:200],
+            })
+            continue
+
+    # Hiçbir strateji çalışmadıysa
+    if not calls:
+        debug_info["fallback"] = "no_results_all_strategies_failed"
+
+    # Deduplicate
+    seen_ids = set()
+    unique_calls = []
+    for c in calls:
+        cid = c.get("call_id", "")
+        if cid and cid not in seen_ids:
+            seen_ids.add(cid)
+            unique_calls.append(c)
+        elif not cid:
+            unique_calls.append(c)
+
+    debug_info["total_api"] = len(unique_calls)
+    debug_info["total_before_dedup"] = len(calls)
+
+    return unique_calls[:max_results], debug_info
 
             if not results:
                 continue
