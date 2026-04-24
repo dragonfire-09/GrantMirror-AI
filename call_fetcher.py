@@ -1,1080 +1,742 @@
 """
-call_fetcher.py — Horizon Europe Çağrı Çekici
-EC API (POST) + Euresearch + UfukAvrupa + Yerel DB
+GrantMirror-AI: Live call data fetcher from EC Funding & Tenders Portal.
+Uses EC SEDIA Search API with current Horizon filtering, fallback, cache and Excel export.
 """
-import requests
-import time
+
 import re
-import hashlib
-from datetime import datetime, timedelta
-from typing import Dict, List, Optional, Tuple
-from io import BytesIO
-
-try:
-    from bs4 import BeautifulSoup
-    HAS_BS4 = True
-except ImportError:
-    HAS_BS4 = False
-
-try:
-    import openpyxl
-    HAS_OPENPYXL = True
-except ImportError:
-    HAS_OPENPYXL = False
+import time
+import requests
+from datetime import datetime, date
+from typing import List, Dict, Optional, Tuple
 
 
-# ═══════════════════════════════════════════════════════════
-# CACHE
-# ═══════════════════════════════════════════════════════════
-class CallCache:
-    def __init__(self, ttl_minutes: int = 30):
-        self.ttl = ttl_minutes * 60
-        self._store: Dict[str, dict] = {}
+EC_API_URL = "https://api.tech.ec.europa.eu/search-api/prod/rest/search"
 
-    def get(self, key: str):
-        entry = self._store.get(key)
-        if entry and (time.time() - entry["ts"]) < self.ttl:
-            return entry["data"]
+
+# =========================================================
+# DATE / FILTER HELPERS
+# =========================================================
+
+def _parse_date_safe(value):
+    if not value:
         return None
 
-    def set(self, key: str, data):
-        self._store[key] = {"data": data, "ts": time.time()}
+    text = str(value)
 
-    def clear(self):
-        self._store.clear()
+    match = re.search(r"(\d{4}-\d{2}-\d{2})", text)
+    if match:
+        text = match.group(1)
+    else:
+        text = text[:10]
 
-
-# ═══════════════════════════════════════════════════════════
-# HTML TEMİZLEYİCİ
-# ═══════════════════════════════════════════════════════════
-def clean_html(text) -> str:
-    if text is None:
-        return ""
-    if not isinstance(text, str):
-        text = str(text)
-    if not text:
-        return ""
-    if HAS_BS4:
-        try:
-            soup = BeautifulSoup(text, "html.parser")
-            return soup.get_text(separator=" ", strip=True)
-        except Exception:
-            pass
-    text = re.sub(r'<br\s*/?>', ' ', text)
-    text = re.sub(r'<[^>]+>', '', text)
-    text = re.sub(r'&nbsp;', ' ', text)
-    text = re.sub(r'&amp;', '&', text)
-    text = re.sub(r'&lt;', '<', text)
-    text = re.sub(r'&gt;', '>', text)
-    text = re.sub(r'&quot;', '"', text)
-    text = re.sub(r'&#39;', "'", text)
-    text = re.sub(r'&#\d+;', '', text)
-    text = re.sub(r'&\w+;', '', text)
-    text = re.sub(r'\s+', ' ', text).strip()
-    return text
-
-
-# ═══════════════════════════════════════════════════════════
-# EC API HELPERS
-# ═══════════════════════════════════════════════════════════
-EC_SEARCH_URL = "https://api.tech.ec.europa.eu/search-api/prod/rest/search"
-
-
-def _safe_str(val) -> str:
-    if val is None:
-        return ""
-    if isinstance(val, list):
-        parts = []
-        for v in val:
-            if isinstance(v, dict):
-                parts.append(str(v.get("value", v.get("code", ""))))
-            else:
-                parts.append(str(v))
-        return ", ".join(parts)
-    if isinstance(val, dict):
-        return str(val.get("value", val.get("code", "")))
-    return str(val)
-
-
-def _extract_ec_field(metadata: dict, *field_names) -> str:
-    for target in field_names:
-        target_lower = target.lower()
-        for key, values in metadata.items():
-            if target_lower in key.lower():
-                return clean_html(_safe_str(values))
-    return ""
-
-
-def _extract_ec_list(metadata: dict, *field_names) -> List[str]:
-    for target in field_names:
-        target_lower = target.lower()
-        for key, values in metadata.items():
-            if target_lower in key.lower():
-                if isinstance(values, list):
-                    return [clean_html(_safe_str(v)) for v in values if v]
-                return [clean_html(_safe_str(values))]
-    return []
-
-
-def _normalize_status(raw: str) -> str:
-    if not raw:
-        return "Open"
-    low = raw.lower()
-    if any(x in low for x in ["open", "31094501"]):
-        return "Open"
-    if any(x in low for x in ["forthcoming", "31094502", "upcoming"]):
-        return "Forthcoming"
-    if any(x in low for x in ["closed", "31094503"]):
-        return "Closed"
-    return raw
-
-
-def _detect_action_types_from_text(call_id: str, title: str) -> List[str]:
-    combined = (call_id + " " + title).upper()
-    types = []
-    patterns = [
-        ("ERC-StG", r'ERC.{0,10}(STG|STARTING)'),
-        ("ERC-CoG", r'ERC.{0,10}(COG|CONSOLIDATOR)'),
-        ("ERC-AdG", r'ERC.{0,10}(ADG|ADVANCED)'),
-        ("ERC-PoC", r'ERC.{0,10}(POC|PROOF)'),
-        ("MSCA-DN", r'MSCA.{0,10}(DN|DOCTORAL)'),
-        ("MSCA-PF", r'MSCA.{0,10}(PF|POSTDOC)'),
-        ("EIC-Pathfinder", r'EIC.{0,10}PATHFINDER'),
-        ("EIC-Accelerator", r'EIC.{0,10}ACCELERATOR'),
-        ("CSA", r'\bCSA\b'),
-        ("IA", r'\bIA\b'),
-        ("RIA", r'\bRIA\b'),
-    ]
-    for name, pattern in patterns:
-        if re.search(pattern, combined):
-            types.append(name)
-    return types if types else ["RIA"]
-
-
-def _parse_ec_result(meta: dict) -> Optional[Dict]:
     try:
-        call_id = _extract_ec_field(meta, "identifier", "callIdentifier", "topicIdentifier")
-        title = _extract_ec_field(meta, "title")
+        return datetime.strptime(text, "%Y-%m-%d").date()
+    except Exception:
+        return None
 
-        if not call_id and not title:
+
+def _normalize_status(status_raw: str) -> str:
+    text = str(status_raw).lower()
+
+    if "31094501" in text:
+        return "Open"
+
+    if "31094502" in text:
+        return "Forthcoming"
+
+    if "31094503" in text:
+        return "Closed"
+
+    if "open" in text:
+        return "Open"
+
+    if "forthcoming" in text or "planned" in text:
+        return "Forthcoming"
+
+    if "closed" in text:
+        return "Closed"
+
+    return str(status_raw) if status_raw else "Unknown"
+
+
+def _keep_only_current_horizon(call: Dict) -> bool:
+    """
+    Keep only current Horizon Europe calls.
+    Removes H2020 / 2014-2020 archive / closed old calls.
+    """
+
+    text = " ".join(
+        [
+            str(call.get("call_id", "")),
+            str(call.get("title", "")),
+            str(call.get("programme", "")),
+            str(call.get("status", "")),
+            " ".join(str(t.get("topic_id", "")) for t in call.get("topics", [])),
+        ]
+    ).upper()
+
+    if "H2020" in text or "HORIZON 2020" in text:
+        return False
+
+    old_years = ["2014", "2015", "2016", "2017", "2018", "2019", "2020"]
+    if any(year in text for year in old_years):
+        return False
+
+    status = str(call.get("status", "")).lower()
+
+    if "closed" in status:
+        return False
+
+    deadline = _parse_date_safe(call.get("deadline"))
+
+    if deadline and deadline < date.today():
+        return False
+
+    return True
+
+
+def _deduplicate_calls(calls: List[Dict]) -> List[Dict]:
+    seen = set()
+    unique = []
+
+    for call in calls:
+        key = (
+            call.get("call_id", ""),
+            call.get("title", "")[:80],
+            call.get("deadline", ""),
+        )
+
+        if key in seen:
+            continue
+
+        seen.add(key)
+        unique.append(call)
+
+    return unique
+
+
+# =========================================================
+# MAIN FETCHER
+# =========================================================
+
+def fetch_horizon_calls(
+    programme: str = "HORIZON",
+    status: str = "",
+    page_size: int = 100,
+    page: int = 1,
+    search_text: str = "",
+) -> Tuple[List[Dict], int]:
+    """
+    Fetch current Horizon Europe calls from EC Funding & Tenders Search API.
+
+    status:
+    - "" means Open + Forthcoming
+    - "Open"
+    - "Forthcoming"
+    - "Closed" is intentionally discouraged for current dashboard
+    """
+
+    calls = []
+
+    # If status empty, fetch Open + Forthcoming separately for cleaner results.
+    statuses_to_fetch = [status] if status else ["Open", "Forthcoming"]
+
+    for st in statuses_to_fetch:
+        fetched = _fetch_single_status(
+            programme=programme,
+            status=st,
+            page_size=page_size,
+            page=page,
+            search_text=search_text,
+        )
+
+        calls.extend(fetched)
+
+    calls = _deduplicate_calls(calls)
+
+    # Sort by deadline ascending, N/A last.
+    calls.sort(
+        key=lambda c: _parse_date_safe(c.get("deadline")) or date(2999, 12, 31)
+    )
+
+    return calls, len(calls)
+
+
+def _fetch_single_status(
+    programme: str = "HORIZON",
+    status: str = "Open",
+    page_size: int = 100,
+    page: int = 1,
+    search_text: str = "",
+) -> List[Dict]:
+    query_parts = []
+
+    if programme:
+        query_parts.append(f"frameworkProgramme/{programme}")
+
+    if status:
+        status_code = {
+            "Open": "31094501",
+            "Forthcoming": "31094502",
+            "Closed": "31094503",
+        }.get(status, "")
+
+        if status_code:
+            query_parts.append(f"status/code/{status_code}")
+
+    if search_text and search_text.strip():
+        query_parts.append(search_text.strip())
+
+    query = " AND ".join(query_parts) if query_parts else "frameworkProgramme/HORIZON"
+
+    params = {
+        "apiKey": "SEDIA",
+        "text": query,
+        "type": "1",
+        "pageSize": str(page_size),
+        "pageNumber": str(page),
+        "sort": "sortStatus asc,deadlineDate asc",
+    }
+
+    headers = {
+        "Accept": "application/json",
+        "Content-Type": "application/json",
+        "User-Agent": "GrantMirror-AI/1.0",
+    }
+
+    try:
+        response = requests.get(
+            EC_API_URL,
+            params=params,
+            headers=headers,
+            timeout=30,
+        )
+
+        if response.status_code != 200:
+            return _fetch_fallback(
+                programme=programme,
+                status=status,
+                page_size=page_size,
+                page=page,
+                search_text=search_text,
+            )
+
+        data = response.json()
+        results = data.get("results", [])
+
+        calls = []
+
+        for item in results:
+            parsed = _parse_result(item)
+
+            if parsed and _keep_only_current_horizon(parsed):
+                calls.append(parsed)
+
+        return calls
+
+    except Exception:
+        return _fetch_fallback(
+            programme=programme,
+            status=status,
+            page_size=page_size,
+            page=page,
+            search_text=search_text,
+        )
+
+
+# =========================================================
+# FALLBACK
+# =========================================================
+
+def _fetch_fallback(
+    programme: str,
+    status: str,
+    page_size: int,
+    page: int,
+    search_text: str,
+) -> List[Dict]:
+    query = search_text if search_text else "Horizon Europe"
+
+    params = {
+        "apiKey": "SEDIA",
+        "text": query,
+        "type": "1",
+        "pageSize": str(page_size),
+        "pageNumber": str(page),
+        "sort": "sortStatus asc,deadlineDate asc",
+    }
+
+    try:
+        response = requests.get(EC_API_URL, params=params, timeout=30)
+
+        if response.status_code != 200:
+            return _get_sample_calls()
+
+        data = response.json()
+        results = data.get("results", [])
+
+        calls = []
+
+        for item in results:
+            parsed = _parse_result(item)
+
+            if not parsed:
+                continue
+
+            if status:
+                normalized = _normalize_status(parsed.get("status", ""))
+                if normalized != status:
+                    continue
+
+            if _keep_only_current_horizon(parsed):
+                calls.append(parsed)
+
+        return calls
+
+    except Exception:
+        return _get_sample_calls()
+
+
+# =========================================================
+# PARSING
+# =========================================================
+
+def _as_string(value, default=""):
+    if value is None:
+        return default
+
+    if isinstance(value, list):
+        if not value:
+            return default
+        return _as_string(value[0], default)
+
+    if isinstance(value, dict):
+        return str(
+            value.get("description")
+            or value.get("abbr")
+            or value.get("code")
+            or value.get("label")
+            or default
+        )
+
+    return str(value)
+
+
+def _as_list(value):
+    if value is None:
+        return []
+
+    if isinstance(value, list):
+        return [str(v) for v in value if v is not None]
+
+    if isinstance(value, dict):
+        return [
+            str(
+                value.get("description")
+                or value.get("abbr")
+                or value.get("code")
+                or value
+            )
+        ]
+
+    if isinstance(value, str):
+        if "," in value:
+            return [v.strip() for v in value.split(",") if v.strip()]
+        return [value]
+
+    return [str(value)]
+
+
+def _parse_result(item: Dict) -> Optional[Dict]:
+    try:
+        meta = item.get("metadata", {}) or item
+
+        def get(*keys, default=""):
+            for key in keys:
+                if key in meta:
+                    val = meta.get(key)
+                    if val not in [None, "", []]:
+                        return _as_string(val, default)
+            return default
+
+        def get_list(*keys):
+            for key in keys:
+                if key in meta:
+                    val = meta.get(key)
+                    if val not in [None, "", []]:
+                        return _as_list(val)
+            return []
+
+        call_id = get("identifier", "callIdentifier", "ccm2Id", "topicIdentifier")
+        title = get("title", "callTitle", "topicTitle")
+
+        if not title and not call_id:
             return None
 
-        status_raw = _extract_ec_field(meta, "status")
-        deadline = _extract_ec_field(meta, "deadlineDate", "deadlineDates")
-        start_date = _extract_ec_field(meta, "startDate", "openingDate")
-        budget = _extract_ec_field(meta, "budget", "budgetOverviewReference")
-        desc = _extract_ec_field(meta, "description", "smedescription")
-        programme = _extract_ec_field(meta, "programmeDivision", "destination")
-        types_list = _extract_ec_list(meta, "typesOfAction", "typeOfAction")
-        keywords_list = _extract_ec_list(meta, "keywords", "tags")
+        status_raw = get("status", "callStatus", "sortStatus")
+        status = _normalize_status(status_raw)
 
-        status_display = _normalize_status(status_raw)
+        deadline = get("deadlineDate", "deadlineDates", "deadline", "endDate")
+        opening = get("startDate", "openingDate")
+        budget = get("budget", "callBudget", "budgetOverall", default="N/A")
 
-        if deadline:
-            date_match = re.search(r'(\d{4}-\d{2}-\d{2})', deadline)
-            if date_match:
-                deadline = date_match.group(1)
-            else:
-                deadline = deadline[:10] if len(deadline) >= 10 else "N/A"
+        action_types = get_list("typesOfAction", "typeOfAction", "actionType", "fundingScheme")
 
-        if not types_list:
-            types_list = _detect_action_types_from_text(call_id, title)
+        topic_ids = get_list("topicIdentifier", "topicId", "identifier")
+        topic_titles = get_list("topicTitle", "title")
 
-        link = ""
-        if call_id:
-            clean_id = call_id.split(",")[0].strip()
-            link = (
-                f"https://ec.europa.eu/info/funding-tenders/"
-                f"opportunities/portal/screen/opportunities/"
-                f"topic-details/{clean_id}"
+        topics = []
+
+        for i, topic_id in enumerate(topic_ids):
+            topic_title = topic_titles[i] if i < len(topic_titles) else topic_id
+            topics.append(
+                {
+                    "topic_id": str(topic_id),
+                    "title": str(topic_title),
+                }
             )
+
+        keywords = get_list("keywords", "tags")
+        programme = " / ".join(get_list("programmePeriod", "programme")) or get(
+            "frameworkProgramme",
+            default="HORIZON",
+        )
+
+        url_val = get("url", "link")
+
+        if not url_val and topic_ids:
+            clean_topic = str(topic_ids[0]).split(",")[0].strip()
+            url_val = (
+                "https://ec.europa.eu/info/funding-tenders/opportunities/"
+                f"portal/screen/opportunities/topic-details/{clean_topic}"
+            )
+
+        elif not url_val and call_id:
+            url_val = (
+                "https://ec.europa.eu/info/funding-tenders/opportunities/"
+                f"portal/screen/opportunities/calls-for-proposals?callIdentifier={call_id}"
+            )
+
+        deadline_date = _parse_date_safe(deadline)
+        deadline_clean = deadline_date.isoformat() if deadline_date else str(deadline or "N/A")[:20]
 
         return {
             "call_id": call_id or "N/A",
-            "title": title or call_id or "N/A",
-            "status": status_display,
-            "deadline": deadline if deadline else "N/A",
-            "start_date": start_date[:10] if start_date else "",
-            "budget_total": budget,
-            "budget_per_project": "",
-            "action_types": types_list if types_list else ["RIA"],
-            "description": desc[:500] if desc else "",
-            "keywords": keywords_list,
-            "destination": programme,
-            "scope": desc[:1000] if desc else "",
-            "expected_outcomes": "",
-            "link": link,
-            "source": "EC API",
-            "topics": [{"topic_id": call_id.split(",")[0].strip()}] if call_id else [],
+            "title": title or "N/A",
+            "status": status,
+            "programme": programme,
+            "opening_date": opening,
+            "deadline": deadline_clean,
+            "budget": str(budget),
+            "action_types": action_types,
+            "topics": topics,
+            "keywords": keywords,
+            "url": url_val,
+            "raw": item,
+            "source": "EC_API",
         }
+
     except Exception:
         return None
 
 
-# ═══════════════════════════════════════════════════════════
-# EC API — POST + GET FALLBACK + PAGINATION
-# ═══════════════════════════════════════════════════════════
-def fetch_horizon_calls(
-    search_text: str = "",
-    status: str = "",
-    max_results: int = 500,
-    max_pages: int = 5,
-) -> Tuple[List[Dict], dict]:
-    """
-    EC Funding & Tenders API — Çoklu endpoint + format denemesi.
-    """
-    calls = []
-    debug_info = {
-        "attempts": [],
-        "success": False,
-        "total_api": 0,
-        "pages_fetched": 0,
+# =========================================================
+# TOPIC DETAILS
+# =========================================================
+
+def fetch_topic_details(topic_id: str) -> Optional[Dict]:
+    params = {
+        "apiKey": "SEDIA",
+        "text": f'identifier/"{topic_id}"',
+        "type": "1",
+        "pageSize": "5",
     }
 
-    # ─── Strateji 1: JSON bool query POST ───
     try:
-        url1 = "https://api.tech.ec.europa.eu/search-api/prod/rest/search"
-        body1 = {
-            "apiKey": "SEDIA",
-            "text": search_text if search_text else "*",
-            "pageSize": min(max_results, 100),
-            "pageNumber": 1,
-            "sort": "deadlineDate:desc",
-            "query": {
-                "bool": {
-                    "must": [
-                        {"term": {"programmePeriod": "2021-2027"}},
-                        {"term": {"frameworkProgramme": "43108390"}},
-                    ]
-                }
-            },
-        }
-        if status:
-            sm = {"open": "31094501", "forthcoming": "31094502", "closed": "31094503"}
-            sc = sm.get(status.lower(), "")
-            if sc:
-                body1["query"]["bool"]["must"].append({"term": {"status": sc}})
+        response = requests.get(EC_API_URL, params=params, timeout=20)
 
-        resp1 = requests.post(
-            url1,
-            headers={"Content-Type": "application/json", "Accept": "application/json"},
-            json=body1,
-            timeout=25,
-        )
-        debug_info["attempts"].append({
-            "strategy": "rest_post_json_query",
-            "url": url1,
-            "status": resp1.status_code,
-            "body_type": "json_bool_query",
-        })
-        if resp1.status_code == 200:
-            data = resp1.json()
-            for r in data.get("results", []):
-                c = _parse_ec_result(r.get("metadata", {}))
-                if c:
-                    calls.append(c)
-            debug_info["attempts"][-1]["count"] = len(calls)
-    except Exception as e:
-        debug_info["attempts"].append({
-            "strategy": "rest_post_json_query",
-            "error": str(e)[:200],
-        })
-
-    # ─── Strateji 2: String query POST + SAYFALAMA (ÇALIŞIYOR!) ───
-    if not calls:
-        try:
-            url2 = "https://api.tech.ec.europa.eu/search-api/prod/rest/search"
-            page_size = min(max_results, 100)
-
-            for page in range(1, max_pages + 1):
-                params_str = (
-                    f"apiKey=SEDIA"
-                    f"&text={'horizon ' + search_text if search_text else '*'}"
-                    f"&pageSize={page_size}"
-                    f"&pageNumber={page}"
-                    f"&query=programmePeriod%2Fcode%3D%272021-2027%27"
-                    f"%20AND%20frameworkProgramme%2Fcode%3D%2743108390%27"
-                )
-
-                # Status filtresi
-                if status:
-                    sm = {
-                        "open": "31094501",
-                        "forthcoming": "31094502",
-                        "closed": "31094503",
-                    }
-                    sc = sm.get(status.lower(), "")
-                    if sc:
-                        params_str += f"%20AND%20status%2Fcode%3D%27{sc}%27"
-
-                resp2 = requests.post(
-                    f"{url2}?{params_str}",
-                    headers={"Accept": "application/json"},
-                    timeout=25,
-                )
-
-                if page == 1:
-                    debug_info["attempts"].append({
-                        "strategy": "rest_post_query_string",
-                        "status": resp2.status_code,
-                    })
-
-                if resp2.status_code != 200:
-                    break
-
-                data = resp2.json()
-                total_results = data.get("totalResults", 0)
-                results = data.get("results", [])
-
-                if page == 1:
-                    debug_info["attempts"][-1]["total_results"] = total_results
-                    debug_info["attempts"][-1]["page1_count"] = len(results)
-
-                if not results:
-                    break
-
-                for r in results:
-                    c = _parse_ec_result(r.get("metadata", {}))
-                    if c:
-                        calls.append(c)
-
-                debug_info["pages_fetched"] = page
-
-                if len(calls) >= max_results:
-                    break
-                if len(results) < page_size:
-                    break
-
-                time.sleep(0.3)
-
-            if debug_info["attempts"] and debug_info["attempts"][-1].get("strategy") == "rest_post_query_string":
-                debug_info["attempts"][-1]["count"] = len(calls)
-
-        except Exception as e:
-            debug_info["attempts"].append({
-                "strategy": "rest_post_query_string",
-                "error": str(e)[:200],
-            })
-
-    # ─── Strateji 3: Portal Topic Search API ───
-    if not calls:
-        try:
-            url3 = (
-                "https://ec.europa.eu/info/funding-tenders/opportunities/"
-                "data/topicSearch/search.json"
-            )
-            params3 = {
-                "callStatus": status.upper() if status else "OPEN,FORTHCOMING",
-                "frameworkProgramme": "HORIZON",
-                "pageSize": str(min(max_results, 100)),
-                "pageNumber": "0",
-                "sortBy": "deadlineDate",
-                "orderBy": "desc",
-            }
-            if search_text:
-                params3["keywords"] = search_text
-
-            resp3 = requests.get(
-                url3,
-                params=params3,
-                headers={
-                    "Accept": "application/json",
-                    "User-Agent": "GrantMirror-AI/1.0",
-                },
-                timeout=25,
-            )
-            debug_info["attempts"].append({
-                "strategy": "portal_topic_search",
-                "url": url3,
-                "status": resp3.status_code,
-            })
-            if resp3.status_code == 200:
-                data = resp3.json()
-                topics = data.get("topicResults", data.get("results", []))
-                if isinstance(topics, dict):
-                    topics = topics.get("content", topics.get("topics", []))
-                for t in topics:
-                    call = _parse_portal_topic(t)
-                    if call:
-                        calls.append(call)
-                debug_info["attempts"][-1]["count"] = len(calls)
-        except Exception as e:
-            debug_info["attempts"].append({
-                "strategy": "portal_topic_search",
-                "error": str(e)[:200],
-            })
-
-    # ─── Strateji 4: Form-encoded POST ───
-    if not calls:
-        try:
-            url4 = "https://api.tech.ec.europa.eu/search-api/prod/rest/search"
-            form_data = {
-                "apiKey": "SEDIA",
-                "text": search_text if search_text else "*",
-                "pageSize": str(min(max_results, 100)),
-                "pageNumber": "1",
-                "query": (
-                    "programmePeriod/code='2021-2027' AND "
-                    "frameworkProgramme/code='43108390'"
-                ),
-            }
-            resp4 = requests.post(
-                url4,
-                data=form_data,
-                headers={"Accept": "application/json"},
-                timeout=25,
-            )
-            debug_info["attempts"].append({
-                "strategy": "rest_post_form_encoded",
-                "status": resp4.status_code,
-            })
-            if resp4.status_code == 200:
-                data = resp4.json()
-                for r in data.get("results", []):
-                    c = _parse_ec_result(r.get("metadata", {}))
-                    if c:
-                        calls.append(c)
-                debug_info["attempts"][-1]["count"] = len(calls)
-        except Exception as e:
-            debug_info["attempts"].append({
-                "strategy": "rest_post_form_encoded",
-                "error": str(e)[:200],
-            })
-
-    # ─── Strateji 5: EC Portal HTML scrape (son çare) ───
-    if not calls:
-        try:
-            calls_scrape = _scrape_ec_portal(search_text, status, max_results)
-            calls.extend(calls_scrape)
-            debug_info["attempts"].append({
-                "strategy": "ec_portal_scrape",
-                "count": len(calls_scrape),
-            })
-        except Exception as e:
-            debug_info["attempts"].append({
-                "strategy": "ec_portal_scrape",
-                "error": str(e)[:200],
-            })
-
-    # ─── Dedup ───
-    seen = set()
-    unique = []
-    for c in calls:
-        cid = c.get("call_id", "")
-        if cid and cid not in seen:
-            seen.add(cid)
-            unique.append(c)
-        elif not cid:
-            unique.append(c)
-
-    debug_info["total_api"] = len(unique)
-    debug_info["before_dedup"] = len(calls)
-    debug_info["success"] = len(unique) > 0
-    if unique:
-        debug_info["winning_strategy"] = next(
-            (a["strategy"] for a in debug_info["attempts"] if a.get("count", 0) > 0),
-            "unknown",
-        )
-
-    return unique[:max_results], debug_info
-
-
-def _parse_portal_topic(topic: dict) -> Optional[Dict]:
-    """EC Portal topic search sonucunu parse et."""
-    try:
-        call_id = topic.get("identifier", topic.get("topicIdentifier", ""))
-        title = topic.get("title", topic.get("topicTitle", ""))
-        status_raw = topic.get("callStatus", topic.get("status", "Open"))
-        deadline = topic.get("deadlineDate", topic.get("deadline", ""))
-        budget = topic.get("budgetOverall", topic.get("budget", ""))
-        desc = topic.get("description", topic.get("shortDescription", ""))
-        action_types = topic.get("typesOfAction", [])
-
-        if isinstance(action_types, str):
-            action_types = [action_types]
-        if not call_id and not title:
+        if response.status_code != 200:
             return None
 
-        status_display = _normalize_status(str(status_raw)) if isinstance(status_raw, str) else "Open"
+        data = response.json()
+        results = data.get("results", [])
 
-        if deadline:
-            dm = re.search(r'(\d{4}-\d{2}-\d{2})', str(deadline))
-            deadline = dm.group(1) if dm else str(deadline)[:10]
+        for result in results:
+            meta = result.get("metadata", {})
 
-        link = ""
-        if call_id:
-            clean_id = str(call_id).split(",")[0].strip()
-            link = (
-                f"https://ec.europa.eu/info/funding-tenders/"
-                f"opportunities/portal/screen/opportunities/"
-                f"topic-details/{clean_id}"
-            )
+            identifier = meta.get("identifier", "")
 
-        return {
-            "call_id": str(call_id) or "N/A",
-            "title": clean_html(str(title)) or str(call_id) or "N/A",
-            "status": status_display,
-            "deadline": deadline if deadline else "N/A",
-            "start_date": "",
-            "budget_total": str(budget) if budget else "",
-            "budget_per_project": "",
-            "action_types": action_types if action_types else ["RIA"],
-            "description": clean_html(str(desc))[:500],
-            "keywords": [],
-            "destination": "",
-            "scope": clean_html(str(desc))[:1000],
-            "expected_outcomes": "",
-            "link": link,
-            "source": "EC Portal",
-            "topics": [{"topic_id": str(call_id)}] if call_id else [],
-        }
-    except Exception:
-        return None
+            if isinstance(identifier, list):
+                identifier = identifier[0] if identifier else ""
 
-
-def _scrape_ec_portal(
-    search_text: str = "",
-    status: str = "",
-    max_results: int = 50,
-) -> List[Dict]:
-    """EC F&T Portal'ı doğrudan scrape et (son çare)."""
-    if not HAS_BS4:
-        return []
-
-    calls = []
-    try:
-        url = (
-            "https://ec.europa.eu/info/funding-tenders/opportunities/"
-            "portal/screen/opportunities/topic-search"
-        )
-        params = {
-            "programmePart": "HORIZON",
-            "callStatus": status.upper() if status else "OPEN,FORTHCOMING",
-        }
-        if search_text:
-            params["keywords"] = search_text
-
-        headers = {
-            "User-Agent": (
-                "Mozilla/5.0 (Windows NT 10.0; Win64; x64) "
-                "AppleWebKit/537.36 Chrome/120.0 Safari/537.36"
-            ),
-            "Accept": "text/html,application/json",
-        }
-
-        resp = requests.get(url, params=params, headers=headers, timeout=25)
-        if resp.status_code != 200:
-            return []
-
-        try:
-            data = resp.json()
-            topics = (
-                data.get("topicResults", {}).get("content", [])
-                if isinstance(data.get("topicResults"), dict)
-                else data.get("results", [])
-            )
-            for t in topics[:max_results]:
-                call = _parse_portal_topic(t)
-                if call:
-                    calls.append(call)
-            return calls
-        except (ValueError, KeyError):
-            pass
-
-        soup = BeautifulSoup(resp.text, "html.parser")
-        seen = set()
-        for el in soup.find_all(["div", "tr", "article"]):
-            text = el.get_text(separator=" ", strip=True)
-            if len(text) < 20:
-                continue
-            if not re.search(r'HORIZON|ERC|EIC|MSCA', text, re.IGNORECASE):
+            if topic_id.lower() not in str(identifier).lower():
                 continue
 
-            title = ""
-            for h in el.find_all(["h3", "h4", "a", "strong"]):
-                t = clean_html(h.get_text(strip=True))
-                if len(t) >= 10:
-                    title = t
-                    break
-            if not title or title.lower()[:40] in seen:
-                continue
-            seen.add(title.lower()[:40])
+            description = meta.get("description", "")
 
-            link = ""
-            a = el.find("a", href=True)
-            if a:
-                link = a.get("href", "")
-                if link and not link.startswith("http"):
-                    link = f"https://ec.europa.eu{link}"
+            if isinstance(description, list):
+                description = description[0] if description else ""
 
-            deadline = "N/A"
-            dm = re.search(r'(\d{4}-\d{2}-\d{2})', text)
-            if dm:
-                deadline = dm.group(1)
+            title = meta.get("title", "")
 
-            calls.append({
-                "call_id": f"EC-{hashlib.md5(title.encode()).hexdigest()[:8]}",
+            if isinstance(title, list):
+                title = title[0] if title else ""
+
+            return {
+                "topic_id": topic_id,
                 "title": title,
-                "status": "Open",
-                "deadline": deadline,
-                "start_date": "",
-                "budget_total": "",
-                "budget_per_project": "",
-                "action_types": _detect_action_types_from_text("", title),
-                "description": clean_html(text)[:500],
-                "keywords": [],
-                "destination": "",
-                "scope": clean_html(text)[:1000],
-                "expected_outcomes": "",
-                "link": link,
-                "source": "EC Scrape",
-                "topics": [],
-            })
-
-            if len(calls) >= max_results:
-                break
+                "description": description,
+                "keywords": meta.get("keywords", []),
+                "deadline": meta.get("deadlineDate", ""),
+                "action_type": meta.get("typesOfAction", []),
+            }
 
     except Exception:
-        pass
-
-    return calls
-
-# ═══════════════════════════════════════════════════════════
-# TOPIC DETAILS
-# ═══════════════════════════════════════════════════════════
-def fetch_topic_details(topic_id: str) -> Optional[Dict]:
-    if not topic_id or topic_id == "N/A":
         return None
-    try:
-        body = {
-            "apiKey": "SEDIA",
-            "text": f'"{topic_id}"',
-            "pageSize": 5,
-            "pageNumber": 1,
-        }
-        headers = {"Content-Type": "application/json", "Accept": "application/json"}
 
-        resp = requests.post(EC_SEARCH_URL, headers=headers, json=body, timeout=15)
-        if resp.status_code != 200:
-            resp = requests.get(
-                EC_SEARCH_URL,
-                params={k: str(v) for k, v in body.items()},
-                timeout=15,
-            )
-
-        if resp.status_code == 200:
-            data = resp.json()
-            for r in data.get("results", []):
-                meta = r.get("metadata", {})
-                found_id = _extract_ec_field(meta, "identifier")
-                if topic_id.lower() in found_id.lower():
-                    return {
-                        "topic_id": topic_id,
-                        "title": _extract_ec_field(meta, "title"),
-                        "description": _extract_ec_field(meta, "description"),
-                        "budget": _extract_ec_field(meta, "budget"),
-                        "deadline": _extract_ec_field(meta, "deadlineDate"),
-                        "conditions": _extract_ec_field(meta, "conditions"),
-                    }
-    except Exception:
-        pass
     return None
 
 
-# ═══════════════════════════════════════════════════════════
-# EURESEARCH SCRAPER
-# ═══════════════════════════════════════════════════════════
-EURESEARCH_URL = "https://www.euresearch.ch/en/our-services/inform/open-calls-137.html"
+# =========================================================
+# ACTION TYPE / CONTEXT
+# =========================================================
 
+def detect_action_type_from_call(call_data: Dict) -> str:
+    action_types = call_data.get("action_types", [])
 
-def fetch_euresearch_calls(max_results: int = 50) -> List[Dict]:
-    if not HAS_BS4:
-        return []
+    all_text = " ".join(
+        action_types
+        + [
+            call_data.get("title", ""),
+            call_data.get("call_id", ""),
+        ]
+    ).upper()
 
-    calls = []
-    try:
-        headers = {
-            "User-Agent": (
-                "Mozilla/5.0 (Windows NT 10.0; Win64; x64) "
-                "AppleWebKit/537.36 Chrome/120.0 Safari/537.36"
-            ),
-            "Accept": "text/html,application/xhtml+xml",
-        }
-        resp = requests.get(EURESEARCH_URL, headers=headers, timeout=20)
-        if resp.status_code != 200:
-            return []
+    if "MSCA" in all_text or "MARIE" in all_text:
+        return "MSCA-DN"
 
-        soup = BeautifulSoup(resp.text, "html.parser")
-        seen_titles = set()
+    if "ERC" in all_text:
+        return "ERC-StG"
 
-        for block in soup.find_all(["div", "article", "li", "tr"], recursive=True):
-            text = block.get_text(separator=" ", strip=True)
-            if len(text) < 30:
-                continue
-            if not re.search(
-                r'(HORIZON|ERC|EIC|MSCA|Pathfinder|Accelerator|'
-                r'Starting|Consolidator|Advanced|Doctoral|'
-                r'Postdoctoral|Twinning|Teaming|Cluster)',
-                text, re.IGNORECASE,
-            ):
-                continue
+    if "PATHFINDER" in all_text:
+        return "EIC-Pathfinder-Open"
 
-            title = ""
-            for h in block.find_all(["h2", "h3", "h4", "strong", "b"]):
-                t = clean_html(h.get_text(strip=True))
-                if len(t) >= 10:
-                    title = t
-                    break
-            if not title:
-                lines = [l.strip() for l in text.split("\n") if len(l.strip()) >= 10]
-                if lines:
-                    title = clean_html(lines[0])[:200]
-            if not title or len(title) < 10:
-                continue
+    if "ACCELERATOR" in all_text:
+        return "EIC-Accelerator"
 
-            tk = title.lower()[:50]
-            if tk in seen_titles:
-                continue
-            seen_titles.add(tk)
+    if "EIC" in all_text:
+        return "EIC-Pathfinder-Open"
 
-            link = ""
-            for a in block.find_all("a", href=True):
-                href = a.get("href", "")
-                if any(x in href.lower() for x in ["topic", "call", "horizon", "erc", "eic", "ec.europa"]):
-                    link = href
-                    break
-            if not link:
-                fa = block.find("a", href=True)
-                if fa:
-                    link = fa.get("href", "")
-            if link and not link.startswith("http"):
-                link = f"https://www.euresearch.ch{link}"
+    if "CSA" in all_text:
+        return "CSA"
 
-            status = "Open"
-            tl = text.lower()
-            if "forthcoming" in tl or "upcoming" in tl:
-                status = "Forthcoming"
-            elif "closed" in tl:
-                status = "Closed"
+    if "RIA" in all_text:
+        return "RIA"
 
-            deadline = "N/A"
-            dm = re.search(r'(\d{4}-\d{2}-\d{2})', text)
-            if dm:
-                deadline = dm.group(1)
-            else:
-                dm2 = re.search(r'(\d{2})\.(\d{2})\.(\d{4})', text)
-                if dm2:
-                    d, m, y = dm2.groups()
-                    deadline = f"{y}-{m}-{d}"
+    if re.search(r"\bIA\b", all_text):
+        return "IA"
 
-            budget = ""
-            bm = re.search(r'€\s*[\d.,]+\s*[MmKkBb]?', text)
-            if bm:
-                budget = bm.group(0).strip()
-
-            action_types = _detect_action_types_from_text(title, text)
-
-            call_id = ""
-            im = re.search(
-                r'(HORIZON-[A-Z0-9]+-\d{4}-[A-Z0-9-]+|'
-                r'ERC-\d{4}-[A-Za-z]+|EIC-\d{4}-[A-Za-z]+|'
-                r'MSCA-\d{4}-[A-Za-z-]+)',
-                text,
-            )
-            if im:
-                call_id = im.group(1)
-            else:
-                call_id = f"EUR-{hashlib.md5(title.encode()).hexdigest()[:8]}"
-
-            desc = clean_html(text)
-            if desc.startswith(title):
-                desc = desc[len(title):].strip()
-
-            calls.append({
-                "call_id": call_id,
-                "title": title,
-                "status": status,
-                "deadline": deadline,
-                "start_date": "",
-                "budget_total": budget,
-                "budget_per_project": budget,
-                "action_types": action_types,
-                "description": desc[:500],
-                "keywords": [],
-                "destination": "",
-                "scope": desc[:1000],
-                "expected_outcomes": "",
-                "link": link or EURESEARCH_URL,
-                "source": "Euresearch",
-                "topics": [],
-            })
-
-            if len(calls) >= max_results:
-                break
-
-    except Exception:
-        pass
-
-    return calls
-
-
-# ═══════════════════════════════════════════════════════════
-# UFUK AVRUPA SCRAPER
-# ═══════════════════════════════════════════════════════════
-UFUKAVRUPA_BASE = "https://ufukavrupa.org.tr"
-
-
-def fetch_ufukavrupa_calls(max_results: int = 30) -> List[Dict]:
-    if not HAS_BS4:
-        return []
-
-    calls = []
-    try:
-        headers = {
-            "User-Agent": "Mozilla/5.0 Chrome/120.0",
-            "Accept": "text/html",
-            "Accept-Language": "tr-TR,tr;q=0.9",
-        }
-
-        for url in [f"{UFUKAVRUPA_BASE}/tr/cagrilar", f"{UFUKAVRUPA_BASE}/tr"]:
-            try:
-                resp = requests.get(url, headers=headers, timeout=20)
-                if resp.status_code != 200:
-                    continue
-
-                soup = BeautifulSoup(resp.text, "html.parser")
-                seen = set()
-
-                for el in soup.find_all(["article", "div", "li"]):
-                    text = el.get_text(separator=" ", strip=True)
-                    if len(text) < 30:
-                        continue
-                    if not any(kw in text.lower() for kw in [
-                        "çağrı", "horizon", "erc", "eic", "msca",
-                        "hibe", "başvuru", "program", "cluster", "call",
-                    ]):
-                        continue
-
-                    title_el = el.find(["h2", "h3", "h4", "a"])
-                    if not title_el:
-                        continue
-                    title = clean_html(title_el.get_text(strip=True))
-                    if not title or len(title) < 10:
-                        continue
-                    tk = title.lower()[:50]
-                    if tk in seen:
-                        continue
-                    seen.add(tk)
-
-                    link = ""
-                    a = title_el if title_el.name == "a" else title_el.find("a")
-                    if a:
-                        link = a.get("href", "")
-                    if link and not link.startswith("http"):
-                        link = f"{UFUKAVRUPA_BASE}{link}"
-
-                    deadline = "N/A"
-                    dm = re.search(r'(\d{4}-\d{2}-\d{2})', text)
-                    if dm:
-                        deadline = dm.group(1)
-
-                    calls.append({
-                        "call_id": f"UA-{hashlib.md5(title.encode()).hexdigest()[:8]}",
-                        "title": title,
-                        "status": "Open",
-                        "deadline": deadline,
-                        "start_date": "",
-                        "budget_total": "",
-                        "budget_per_project": "",
-                        "action_types": _detect_action_types_from_text("", title),
-                        "description": clean_html(text)[:500],
-                        "keywords": [],
-                        "destination": "",
-                        "scope": clean_html(text)[:1000],
-                        "expected_outcomes": "",
-                        "link": link or url,
-                        "source": "UfukAvrupa",
-                        "topics": [],
-                    })
-                    if len(calls) >= max_results:
-                        break
-
-                if calls:
-                    break
-            except Exception:
-                continue
-    except Exception:
-        pass
-
-    return calls
-
-
-# ═══════════════════════════════════════════════════════════
-# DETECT ACTION TYPE
-# ═══════════════════════════════════════════════════════════
-def detect_action_type_from_call(call_data: dict) -> str:
-    types = call_data.get("action_types", [])
-    title = call_data.get("title", "").lower()
-    call_id = call_data.get("call_id", "").lower()
-    combined = " ".join(types).lower() + " " + title + " " + call_id
-
-    mapping = [
-        (["eic-pathfinder", "eic pathfinder", "pathfinder open"], "EIC-Pathfinder-Open"),
-        (["eic-accelerator", "eic accelerator"], "EIC-Accelerator"),
-        (["erc-stg", "erc starting", "starting grant"], "ERC-StG"),
-        (["erc-cog", "erc consolidator", "consolidator"], "ERC-CoG"),
-        (["erc-adg", "erc advanced", "advanced grant"], "ERC-AdG"),
-        (["msca-dn", "msca doctoral", "doctoral network"], "MSCA-DN"),
-        (["msca-pf", "msca postdoctoral"], "MSCA-PF"),
-        (["csa", "coordination and support"], "CSA"),
-        (["ia", "innovation action"], "IA"),
-        (["ria", "research and innovation"], "RIA"),
-    ]
-    for keywords, action_type in mapping:
-        if any(kw in combined for kw in keywords):
-            return action_type
-    if types and types[0] != "RIA":
-        return types[0]
     return "RIA"
 
 
-def build_call_specific_criteria(call_data: dict, topic_details: dict = None) -> dict:
-    at = detect_action_type_from_call(call_data)
-    ctx_parts = [
-        f"Call: {clean_html(call_data.get('call_id', 'N/A'))}",
-        f"Title: {clean_html(call_data.get('title', 'N/A'))}",
-        f"Action Type: {at}",
-        f"Deadline: {call_data.get('deadline', 'N/A')}",
+def build_call_specific_criteria(
+    call_data: Dict,
+    topic_details: Optional[Dict] = None,
+) -> Dict:
+    action_type = detect_action_type_from_call(call_data)
+
+    context = {
+        "action_type": action_type,
+        "call_id": call_data.get("call_id", ""),
+        "call_title": call_data.get("title", ""),
+        "deadline": call_data.get("deadline", ""),
+        "budget": call_data.get("budget", ""),
+        "topic_scope": "",
+        "expected_outcomes": [],
+        "topic_keywords": call_data.get("keywords", []),
+    }
+
+    if topic_details:
+        description = topic_details.get("description", "")
+
+        context["topic_scope"] = description[:3000] if description else ""
+        context["topic_keywords"] = topic_details.get(
+            "keywords",
+            context["topic_keywords"],
+        )
+        context["expected_outcomes"] = _extract_outcomes(description)
+
+    context["evaluation_context"] = _build_context_text(context)
+
+    return context
+
+
+def _extract_outcomes(description: str) -> List[str]:
+    outcomes = []
+    lines = description.split("\n")
+    capture = False
+
+    for line in lines:
+        stripped = line.strip()
+        lowered = stripped.lower()
+
+        if "expected outcome" in lowered or "expected impact" in lowered:
+            capture = True
+            continue
+
+        if capture:
+            if stripped.startswith(("-", "•", "–", "*")) or (
+                len(stripped) > 15 and stripped[0].isupper()
+            ):
+                outcomes.append(stripped.lstrip("-•–* "))
+
+            elif stripped == "" and outcomes:
+                capture = False
+
+    return outcomes[:10]
+
+
+def _build_context_text(ctx: Dict) -> str:
+    parts = [
+        f"CALL: {ctx.get('call_title', 'N/A')}",
+        f"ACTION TYPE: {ctx.get('action_type', 'N/A')}",
+        f"DEADLINE: {ctx.get('deadline', 'N/A')}",
+        f"BUDGET: {ctx.get('budget', 'N/A')}",
     ]
-    scope = clean_html(call_data.get("scope", ""))
-    if scope:
-        ctx_parts.append(f"Scope: {scope[:800]}")
-    outcomes = clean_html(call_data.get("expected_outcomes", ""))
+
+    if ctx.get("topic_scope"):
+        parts.append(f"\nTOPIC SCOPE:\n{ctx['topic_scope'][:2000]}")
+
+    outcomes = ctx.get("expected_outcomes", [])
+
     if outcomes:
-        ctx_parts.append(f"Expected Outcomes: {outcomes[:500]}")
-    if topic_details and topic_details.get("description"):
-        ctx_parts.append(f"Topic: {clean_html(topic_details['description'][:1000])}")
-    return {
-        "action_type": at,
-        "evaluation_context": "\n".join(ctx_parts),
-        "call_data": call_data,
-        "topic_details": topic_details,
-    }
+        parts.append("\nEXPECTED OUTCOMES:")
+
+        for index, outcome in enumerate(outcomes, 1):
+            parts.append(f"  {index}. {outcome}")
+
+    keywords = ctx.get("topic_keywords", [])
+
+    if keywords:
+        parts.append(
+            f"\nKEYWORDS: {', '.join(str(k) for k in keywords[:15])}"
+        )
+
+    return "\n".join(parts)
 
 
-# ═══════════════════════════════════════════════════════════
-# FETCH ALL
-# ═══════════════════════════════════════════════════════════
-def fetch_all_calls(
-    search_text: str = "",
-    status_filter: str = "",
-    use_ec_api: bool = True,
-    use_euresearch: bool = True,
-    use_ufukavrupa: bool = True,
-    max_api_results: int = 500,
-) -> Tuple[List[Dict], Dict]:
-    all_calls = []
-    src_stats = {
-        "ec_api": 0, "euresearch": 0, "ufukavrupa": 0,
-        "local_db": 0, "total": 0, "ec_debug": {},
-    }
-
-    if use_ec_api:
-        try:
-            ec_calls, ec_debug = fetch_horizon_calls(
-                search_text, status_filter, max_api_results,
-            )
-            src_stats["ec_api"] = len(ec_calls)
-            src_stats["ec_debug"] = ec_debug
-            all_calls.extend(ec_calls)
-        except Exception as e:
-            src_stats["ec_debug"] = {"error": str(e)[:200]}
-
-    if use_euresearch:
-        try:
-            eur = fetch_euresearch_calls(50)
-            src_stats["euresearch"] = len(eur)
-            all_calls.extend(eur)
-        except Exception:
-            pass
-
-    if use_ufukavrupa:
-        try:
-            ua = fetch_ufukavrupa_calls(30)
-            src_stats["ufukavrupa"] = len(ua)
-            all_calls.extend(ua)
-        except Exception:
-            pass
-
-    try:
-        from call_db import HORIZON_CALLS_DB
-        existing = set(c.get("call_id", "") for c in all_calls)
-        added = 0
-        for db_call in HORIZON_CALLS_DB:
-            if db_call.get("call_id") not in existing:
-                cp = dict(db_call)
-                cp["source"] = cp.get("source", "Local DB")
-                all_calls.append(cp)
-                added += 1
-        src_stats["local_db"] = added
-    except Exception:
-        pass
-
-    seen = set()
-    unique = []
-    for c in all_calls:
-        key = c.get("call_id", "") or c.get("title", "")[:60]
-        if key and key not in seen:
-            seen.add(key)
-            c["title"] = clean_html(c.get("title", ""))
-            c["description"] = clean_html(c.get("description", ""))
-            c["destination"] = clean_html(c.get("destination", ""))
-            unique.append(c)
-
-    src_stats["total"] = len(unique)
-    return unique, src_stats
-
-
-# ═══════════════════════════════════════════════════════════
+# =========================================================
 # EXCEL EXPORT
-# ═══════════════════════════════════════════════════════════
-def calls_to_excel_bytes(calls: List[Dict]) -> bytes:
-    if not HAS_OPENPYXL:
-        import csv
-        from io import StringIO
-        out = StringIO()
-        w = csv.writer(out)
-        w.writerow(["Call ID", "Title", "Status", "Deadline", "Action Types", "Budget", "Source", "Link"])
-        for c in calls:
-            w.writerow([
-                c.get("call_id", ""), clean_html(c.get("title", "")),
-                c.get("status", ""), c.get("deadline", ""),
-                ", ".join(c.get("action_types", [])),
-                c.get("budget_per_project", c.get("budget_total", "")),
-                c.get("source", ""), c.get("link", ""),
-            ])
-        return out.getvalue().encode("utf-8-sig")
+# =========================================================
 
-    wb = openpyxl.Workbook()
-    ws = wb.active
-    ws.title = "Horizon Calls"
-    hdrs = ["Call ID", "Title", "Status", "Deadline", "Action Types", "Budget", "Destination", "Source", "Link", "Description"]
-    for col, h in enumerate(hdrs, 1):
-        cell = ws.cell(row=1, column=col, value=h)
-        cell.font = openpyxl.styles.Font(bold=True)
-    for row, c in enumerate(calls, 2):
-        ws.cell(row=row, column=1, value=c.get("call_id", ""))
-        ws.cell(row=row, column=2, value=clean_html(c.get("title", ""))[:200])
-        ws.cell(row=row, column=3, value=c.get("status", ""))
-        ws.cell(row=row, column=4, value=c.get("deadline", ""))
-        ws.cell(row=row, column=5, value=", ".join(c.get("action_types", [])))
-        ws.cell(row=row, column=6, value=c.get("budget_per_project", c.get("budget_total", "")))
-        ws.cell(row=row, column=7, value=clean_html(c.get("destination", ""))[:100])
-        ws.cell(row=row, column=8, value=c.get("source", ""))
-        ws.cell(row=row, column=9, value=c.get("link", ""))
-        ws.cell(row=row, column=10, value=clean_html(c.get("description", ""))[:300])
-    for i, w in enumerate([25, 60, 12, 12, 20, 15, 30, 15, 50, 50], 1):
-        ws.column_dimensions[openpyxl.utils.get_column_letter(i)].width = w
-    buf = BytesIO()
-    wb.save(buf)
-    return buf.getvalue()
+def calls_to_excel_bytes(calls: List[Dict]) -> bytes:
+    import pandas as pd
+    from io import BytesIO
+
+    rows = []
+
+    for call in calls:
+        rows.append(
+            {
+                "Call ID": call.get("call_id", ""),
+                "Title": call.get("title", ""),
+                "Status": call.get("status", ""),
+                "Programme": call.get("programme", ""),
+                "Opening Date": call.get("opening_date", ""),
+                "Deadline": call.get("deadline", ""),
+                "Budget": call.get("budget", ""),
+                "Action Types": ", ".join(call.get("action_types", [])),
+                "Topics": ", ".join(
+                    topic.get("topic_id", "") for topic in call.get("topics", [])
+                ),
+                "Keywords": ", ".join(str(k) for k in call.get("keywords", [])),
+                "URL": call.get("url", ""),
+                "Source": call.get("source", ""),
+            }
+        )
+
+    df = pd.DataFrame(rows)
+
+    output = BytesIO()
+
+    with pd.ExcelWriter(output, engine="xlsxwriter") as writer:
+        df.to_excel(writer, index=False, sheet_name="Horizon Calls")
+
+        workbook = writer.book
+        worksheet = writer.sheets["Horizon Calls"]
+
+        header_format = workbook.add_format(
+            {
+                "bold": True,
+                "bg_color": "#101828",
+                "font_color": "white",
+                "border": 1,
+            }
+        )
+
+        for col_num, value in enumerate(df.columns):
+            worksheet.write(0, col_num, value, header_format)
+            worksheet.set_column(col_num, col_num, 26)
+
+        worksheet.freeze_panes(1, 0)
+        worksheet.autofilter(0, 0, len(df), len(df.columns) - 1)
+
+    output.seek(0)
+
+    return output.getvalue()
+
+
+# =========================================================
+# SAMPLE FALLBACK
+# =========================================================
+
+def _get_sample_calls() -> List[Dict]:
+    return [
+        {
+            "call_id": "HORIZON-CL6-2025-01",
+            "title": "Sample Horizon Europe Cluster 6 2025 Call",
+            "status": "Open",
+            "programme": "HORIZON",
+            "opening_date": "2025-01-01",
+            "deadline": "2026-12-31",
+            "budget": "N/A",
+            "action_types": ["RIA"],
+            "topics": [
+                {
+                    "topic_id": "HORIZON-CL6-2025-01-01",
+                    "title": "Sample topic",
+                }
+            ],
+            "keywords": ["Horizon Europe", "Cluster 6"],
+            "url": "https://ec.europa.eu/info/funding-tenders/opportunities/portal",
+            "raw": {},
+            "source": "sample",
+        }
+    ]
+
+
+# =========================================================
+# SIMPLE TTL CACHE
+# =========================================================
+
+class CallCache:
+    def __init__(self, ttl_minutes=30):
+        self._cache = {}
+        self._ttl = ttl_minutes * 60
+
+    def get(self, key):
+        if key in self._cache:
+            value, timestamp = self._cache[key]
+
+            if time.time() - timestamp < self._ttl:
+                return value
+
+            del self._cache[key]
+
+        return None
+
+    def set(self, key, value):
+        self._cache[key] = (value, time.time())
+
+    def clear(self):
+        self._cache.clear()
