@@ -1,6 +1,6 @@
 """
 GrantMirror-AI: Horizon Europe Proposal Pre-Screening & ESR Simulator
-With live call data, dynamic criteria, and full research report compliance.
+AI-powered call matching, RAG knowledge engine, section-aware scoring.
 """
 import streamlit as st
 import json
@@ -21,9 +21,10 @@ from deidentifier import scan_for_identity_signals, generate_deidentification_re
 from report_generator import generate_esr_report, generate_coaching_report
 from call_fetcher import (
     fetch_horizon_calls, fetch_topic_details,
-    detect_action_type_from_call, build_call_specific_criteria,
-    CallCache,
+    detect_action_type_from_call, build_call_specific_criteria, CallCache,
 )
+from call_db import keyword_match_calls, ai_match_calls, build_call_eval_context, HORIZON_CALLS_DB
+from rag_engine import get_criterion_context as rag_get_context, ai_enhanced_retrieval
 
 # ═══════════════════════════════════════════════════════════
 # PAGE CONFIG
