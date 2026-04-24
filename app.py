@@ -1365,23 +1365,67 @@ def render_feature_dashboard():
         ("📰", "Canlı Haberler", "RSS ve scraper kaynaklarıyla Horizon haberlerini izler.", "News"),
     ]
 
-    html = '<div class="gm-feature-grid">'
+    cards = ""
 
     for icon, title, desc, tag in features:
-        html += f'''
-<div class="gm-feature-card">
-  <div class="gm-feature-top">
-    <div class="gm-feature-icon">{icon}</div>
-    <div class="gm-feature-tag">{tag}</div>
-  </div>
-  <div class="gm-feature-title">{title}</div>
-  <div class="gm-feature-desc">{desc}</div>
-</div>
-'''
+        cards += f"""
+        <div style="
+            background:white;
+            border:1px solid #eaecf0;
+            border-radius:22px;
+            padding:20px;
+            min-height:170px;
+            box-shadow:0 10px 28px rgba(16,24,40,0.06);
+        ">
+            <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:18px;">
+                <div style="
+                    width:52px;height:52px;
+                    border-radius:16px;
+                    background:linear-gradient(135deg,#eef4ff,#dbeafe);
+                    display:flex;
+                    align-items:center;
+                    justify-content:center;
+                    font-size:26px;
+                ">{icon}</div>
+                <div style="
+                    font-size:12px;
+                    font-weight:800;
+                    color:#175cd3;
+                    background:#eff4ff;
+                    padding:5px 10px;
+                    border-radius:999px;
+                ">{tag}</div>
+            </div>
 
-    html += "</div>"
+            <div style="
+                font-size:18px;
+                font-weight:850;
+                color:#101828;
+                margin-bottom:8px;
+            ">{title}</div>
 
-    st.components.v1.html(html, height=520, scrolling=False)
+            <div style="
+                font-size:14px;
+                color:#667085;
+                line-height:1.45;
+            ">{desc}</div>
+        </div>
+        """
+
+    html = f"""
+    <div style="
+        display:grid;
+        grid-template-columns:repeat(4,minmax(0,1fr));
+        gap:18px;
+        margin-top:20px;
+        margin-bottom:20px;
+        font-family:Inter,Arial,sans-serif;
+    ">
+        {cards}
+    </div>
+    """
+
+    st.markdown(html, unsafe_allow_html=True)
     
 def render_evaluation_page():
     with st.sidebar:
