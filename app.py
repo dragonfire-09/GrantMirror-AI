@@ -1710,6 +1710,23 @@ def render_evaluation_page():
             f"Model: {MODEL_NAME} | DB: {len(HORIZON_CALLS_DB)}"
         )
         st.json(results)
+        
+def render_calls_page():
+    st.title("📡 Canlı Çağrılar")
+
+    sel = render_call_dashboard()
+
+    if sel:
+        st.divider()
+        ctx = render_call_detail(sel)
+        st.session_state["selected_call"] = sel
+        st.session_state["call_context"] = ctx
+
+        st.info("💡 Seçilen çağrı Değerlendirme sayfasına aktarıldı.")
+
+        if st.button("🔬 Değerlendirmeye Git", type="primary", use_container_width=True):
+            st.session_state["nav"] = "🔬 Değerlendirme"
+            st.rerun()
 
 
 # ═══════════════════════════════════════════════════════════
