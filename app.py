@@ -1350,6 +1350,7 @@ def render_calls_page():
                 use_container_width=True,
             ):
                 st.rerun()
+                
 def render_feature_dashboard():
     st.markdown("## 🎯 GrantMirror-AI Ne Yapar?")
 
@@ -1364,26 +1365,24 @@ def render_feature_dashboard():
         ("📰", "Canlı Haberler", "RSS ve scraper kaynaklarıyla Horizon haberlerini izler.", "News"),
     ]
 
-    html = """
-    <div class="gm-feature-grid">
-    """
+    html = '<div class="gm-feature-grid">'
 
     for icon, title, desc, tag in features:
-        html += f"""
-        <div class="gm-feature-card">
-            <div class="gm-feature-top">
-                <div class="gm-feature-icon">{icon}</div>
-                <div class="gm-feature-tag">{tag}</div>
-            </div>
-            <div class="gm-feature-title">{title}</div>
-            <div class="gm-feature-desc">{desc}</div>
-        </div>
-        """
+        html += f'''
+<div class="gm-feature-card">
+  <div class="gm-feature-top">
+    <div class="gm-feature-icon">{icon}</div>
+    <div class="gm-feature-tag">{tag}</div>
+  </div>
+  <div class="gm-feature-title">{title}</div>
+  <div class="gm-feature-desc">{desc}</div>
+</div>
+'''
 
     html += "</div>"
 
-    st.markdown(html, unsafe_allow_html=True)
-
+    st.components.v1.html(html, height=520, scrolling=False)
+    
 def render_evaluation_page():
     with st.sidebar:
         st.markdown("## ⚙️ Ayarlar")
