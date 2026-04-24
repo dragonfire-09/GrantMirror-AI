@@ -1475,36 +1475,33 @@ def render_evaluation_page():
     # MAIN UPLOAD AREA
     # ─────────────────────────────
     st.markdown(
-        """
-        <div class="gm-onboarding">
-            <div class="gm-onboarding-left">
-                <div class="gm-eyebrow">AI Proposal Pre-Screening</div>
+"""<div class="gm-onboarding">
+<div class="gm-onboarding-left">
+<div class="gm-eyebrow">AI Proposal Pre-Screening</div>
 
-                <h2>📤 Teklifinizi yükleyin, hakem gibi analiz edelim</h2>
+<h2>📤 Teklifinizi yükleyin, hakem gibi analiz edelim</h2>
 
-                <p>
-                    Horizon Europe Part B dokümanınızı yükleyin. Sistem;
-                    çağrı uyumu, ESR değerlendirmesi ve fonlanma analizi üretir.
-                </p>
+<p>
+Horizon Europe Part B dokümanınızı yükleyin. Sistem;
+çağrı uyumu, ESR değerlendirmesi ve fonlanma analizi üretir.
+</p>
 
-                <div class="gm-onboarding-badges">
-                    <span>PDF</span>
-                    <span>DOCX</span>
-                    <span>ESR Simulation</span>
-                    <span>AI Matching</span>
-                </div>
-            </div>
+<div class="gm-onboarding-badges">
+<span>PDF</span>
+<span>DOCX</span>
+<span>ESR Simulation</span>
+<span>AI Matching</span>
+</div>
+</div>
 
-            <div class="gm-onboarding-steps">
-                <div class="gm-step"><b>1</b><span>Proposal yükle</span></div>
-                <div class="gm-step"><b>2</b><span>AI analiz etsin</span></div>
-                <div class="gm-step"><b>3</b><span>Raporu al</span></div>
-            </div>
-        </div>
-        """,
-        unsafe_allow_html=True,
-    )
-
+<div class="gm-onboarding-steps">
+<div class="gm-step"><b>1</b><span>Proposal yükle</span></div>
+<div class="gm-step"><b>2</b><span>AI analiz etsin</span></div>
+<div class="gm-step"><b>3</b><span>Raporu al</span></div>
+</div>
+</div>""",
+unsafe_allow_html=True,
+)
     uploaded = st.file_uploader(
         "📄 Dosyanızı buraya bırakın",
         type=["pdf", "docx", "doc"],
