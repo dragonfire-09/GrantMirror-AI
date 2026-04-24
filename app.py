@@ -5,10 +5,24 @@ import streamlit as st
 import json
 import time
 import os
+import re
 from typing import Dict, List, Optional
 from collections import Counter
 from datetime import datetime, timedelta
 from openai import OpenAI
+
+def clean_html(text):
+    if not text:
+        return ""
+
+    text = re.sub(r"<[^>]+>", " ", str(text))
+    text = re.sub(r"&nbsp;", " ", text)
+    text = re.sub(r"&amp;", "&", text)
+    text = re.sub(r"&lt;", "<", text)
+    text = re.sub(r"&gt;", ">", text)
+    text = re.sub(r"\s+", " ", text)
+
+    return text.strip()
 
 from config import (
     ActionType, ACTION_TYPE_CONFIGS, WEAKNESS_TAXONOMY,
