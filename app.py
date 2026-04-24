@@ -1754,7 +1754,7 @@ def render_calls_page():
 # MAIN
 # ═══════════════════════════════════════════════════════════
 def main():
-    render_header()
+    render_polished_header()
     inject_modern_css()
 
     pages = ["🔬 Değerlendirme", "📡 Canlı Çağrılar", "📰 Haberler"]
