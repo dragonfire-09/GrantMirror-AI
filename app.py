@@ -726,17 +726,17 @@ def render_call_dashboard():
         use_ufukavrupa = st.checkbox("🇹🇷 UfukAvrupa", value=True)
 
     with sc4:
-        max_results = (
-            st.number_input(
-                "Maks",
-                min_value=10,
-                max_value=500,
-                value=100,
-                step=50,
-            )
-            if use_ec_api
-            else len(HORIZON_CALLS_DB)
+    max_results = (
+        st.number_input(
+            "Maks",
+            min_value=10,
+            max_value=500,
+            value=500,
+            step=50,
         )
+        if use_ec_api
+        else len(HORIZON_CALLS_DB)
+    )
 
     if auto_refresh:
         last_refresh = st.session_state.get("last_refresh_time", 0)
