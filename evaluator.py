@@ -207,20 +207,27 @@ IMPORTANT:
 class HorizonEvaluator:
     """Multi-agent evaluation system."""
 
-    def __init__(
-        self,
-        api_key: Optional[str] = None,
-        knowledge_base: Optional[HorizonKnowledgeBase] = None,
-    ):
-        self.api_key = api_key or os.getenv("OPENAI_API_KEY")
-        self.kb = knowledge_base or HorizonKnowledgeBase()
+    import streamlit as st
 
-        if HAS_OPENAI and self.api_key:
-            self.client = OpenAI(api_key=self.api_key)
-            self.llm_available = True
-        else:
-            self.client = None
-            self.llm_available = False
+def __init__(
+    self,
+    api_key: Optional[str] = None,
+    knowledge_base: Optional[HorizonKnowledgeBase] = None,
+):
+    # OpenRouter key al
+    self.api_key = api_key or st.secrets["OPENROUTER_API_KEY"]
+
+    self.kb = knowledge_base or HorizonKnowledgeBase()
+
+    if HAS_OPENAI and self.api_key:
+        self.client = OpenAI(
+            api_key=self.api_key,
+            base_url="https://openrouter.ai/api/v1",
+        )
+        self.llm_available = True
+    else:
+        self.client = None
+        self.llm_available = False
 
     def _call_llm(self, system_prompt: str, user_prompt: str) -> str:
         """Call the LLM API."""
