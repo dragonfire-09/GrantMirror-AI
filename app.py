@@ -726,7 +726,7 @@ def render_call_dashboard():
         use_ufukavrupa = st.checkbox("🇹🇷 UfukAvrupa", value=True)
 
     with sc4:
-    max_results = (
+        max_results = (
         st.number_input(
             "Maks",
             min_value=10,
