@@ -756,24 +756,54 @@ def render_call_dashboard():
         st.session_state.call_cache.set(cache_key, (calls, src_stats))
         st.session_state["last_fetch_stats"] = src_stats
 
-    # EC API Debug
+       # ─── EC API Debug Bilgisi ───
     ec_debug = src_stats.get("ec_debug", {})
     if ec_debug:
         with st.expander("🔧 EC API Debug"):
-            st.json(ec_debug)
-            if ec_debug.get("attempts"):
-                for att in ec_debug["attempts"]:
-                    status_icon = "✅" if att.get("total_results", 0) > 0 else "❌"
-                    st.markdown(
-                        f"{status_icon} **{att.get('strategy', '?')}** — "
-                        f"HTTP {att.get('status_code', '?')} — "
-                        f"Sonuç: {att.get('total_results', 0)} — "
-                        f"Dönen: {att.get('returned', 0)}"
+            # Özet
+            success = ec_debug.get("success", False)
+            total = ec_debug.get("total_api", 0)
+            pages = ec_debug.get("pages_fetched", 0)
+            winner = ec_debug.get("winning_strategy", "—")
+
+            st.markdown(
+                f"{'✅' if success else '❌'} **Başarı:** {success} | "
+                f"**Toplam:** {total} | **Sayfa:** {pages} | "
+                f"**Kazanan:** `{winner}`"
+            )
+
+            # Her deneme
+            for att in ec_debug.get("attempts", []):
+                name = att.get("strategy", "?")
+                count = att.get("count", 0)
+                http_status = (
+                    att.get("status")
+                    or att.get("post_status")
+                    or att.get("get_status")
+                    or "?"
+                )
+                total_r = att.get("total_results", "?")
+                p1 = att.get("page1_count", "?")
+                error = att.get("error", "")
+
+                icon = "✅" if count > 0 else "❌"
+
+                st.markdown(
+                    f"{icon} **{name}** — "
+                    f"HTTP `{http_status}` — "
+                    f"Sonuç: {total_r} — "
+                    f"Sayfa1: {p1} — "
+                    f"Çekilen: {count}"
+                )
+
+                if att.get("url"):
+                    st.caption(att["url"][:300])
+                if error:
+                    st.error(error[:200])
+                if att.get("get_fallback"):
+                    st.caption(
+                        f"↪ GET fallback: HTTP {att.get('get_status', '?')}"
                     )
-                    if att.get("error"):
-                        st.error(att["error"][:200])
-                    if att.get("url"):
-                        st.caption(att["url"][:200])
 
     if not calls:
         st.info("Çağrı bulunamadı. Filtreleri değiştirin.")
