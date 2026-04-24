@@ -1,13 +1,20 @@
 """
 GrantMirror-AI: Horizon Europe Call Fetcher
-Live EC Funding & Tenders API integration with pagination and Excel export.
+Live EC Funding & Tenders API + Euresearch scraper + Excel export.
 """
 import requests
 import time
+import re
 import io
 from typing import Dict, List, Tuple, Optional
 from dataclasses import dataclass, field
 from datetime import datetime
+
+try:
+    from bs4 import BeautifulSoup
+    HAS_BS4 = True
+except ImportError:
+    HAS_BS4 = False
 
 try:
     import openpyxl
@@ -57,10 +64,6 @@ def fetch_horizon_calls(
     max_pages: int = 5,
     fetch_all: bool = True,
 ) -> Tuple[List[Dict], int]:
-    """
-    Fetch calls from EC API with pagination support.
-    If fetch_all=True, fetches multiple pages up to max_pages.
-    """
     all_calls = []
     total_count = 0
 
@@ -68,18 +71,15 @@ def fetch_horizon_calls(
         params = {
             "apiKey": "SEDIA",
             "text": search_text or "*",
-            "type": "1",  # calls
+            "type": "1",
             "pageSize": str(min(page_size, 100)),
             "pageNumber": str(current_page),
         }
-
-        # Build query filters
         query_parts = []
         if programme:
             query_parts.append(f'programmePeriod/abbreviation="{programme}"')
         if status:
             query_parts.append(f'status/abbreviation="{status}"')
-
         if query_parts:
             params["query"] = " AND ".join(query_parts)
 
@@ -87,13 +87,11 @@ def fetch_horizon_calls(
             resp = requests.get(EC_API_BASE, params=params, timeout=30)
             resp.raise_for_status()
             data = resp.json()
-        except Exception as e:
-            print(f"EC API error (page {current_page}): {e}")
+        except Exception:
             break
 
         results = data.get("results", [])
         total_count = data.get("totalResults", len(results))
-
         if not results:
             break
 
@@ -103,31 +101,24 @@ def fetch_horizon_calls(
             if call_info:
                 all_calls.append(call_info)
 
-        # Stop if we have all results or not fetching all
         if not fetch_all or len(all_calls) >= total_count:
             break
-
-        # Be nice to the API
         time.sleep(0.3)
 
-    # Deduplicate by call_id
     seen = set()
-    unique_calls = []
+    unique = []
     for c in all_calls:
         cid = c.get("call_id", "")
         if cid and cid not in seen:
             seen.add(cid)
-            unique_calls.append(c)
-
-    return unique_calls, total_count
+            unique.append(c)
+    return unique, total_count
 
 
 def _parse_call_metadata(meta: Dict) -> Optional[Dict]:
-    """Parse EC API metadata into our call format."""
     try:
         call_id = _extract_field(meta, "identifier") or _extract_field(meta, "ccm2Id")
         title = _extract_field(meta, "title")
-
         if not call_id and not title:
             return None
 
@@ -140,23 +131,15 @@ def _parse_call_metadata(meta: Dict) -> Optional[Dict]:
             elif "forthcoming" in sl or "upcoming" in sl:
                 status = "Forthcoming"
 
-        deadline = _extract_field(meta, "deadlineDate") or ""
-        if not deadline:
-            deadline = _extract_field(meta, "plannedClosingDate") or ""
+        deadline = _extract_field(meta, "deadlineDate") or _extract_field(meta, "plannedClosingDate") or ""
 
-        # Parse action types
         action_types = []
         at_raw = _extract_field(meta, "typesOfAction")
         if at_raw:
-            if isinstance(at_raw, list):
-                action_types = at_raw
-            else:
-                action_types = [s.strip() for s in str(at_raw).split(",")]
-
+            action_types = [s.strip() for s in str(at_raw).split(",")] if not isinstance(at_raw, list) else at_raw
         if not action_types:
             action_types = _detect_action_types_from_text(call_id or "", title or "")
 
-        # Parse topics
         topics = []
         topics_raw = meta.get("topics", [])
         if isinstance(topics_raw, list):
@@ -175,13 +158,13 @@ def _parse_call_metadata(meta: Dict) -> Optional[Dict]:
             "topics": topics,
             "budget_total": _extract_field(meta, "budget") or "",
             "description": _extract_field(meta, "description") or "",
+            "source": "EC API",
         }
     except Exception:
         return None
 
 
 def _extract_field(meta: Dict, key: str) -> Optional[str]:
-    """Extract a field from EC API metadata (handles nested structures)."""
     if key in meta:
         val = meta[key]
         if isinstance(val, list) and val:
@@ -193,7 +176,6 @@ def _extract_field(meta: Dict, key: str) -> Optional[str]:
 
 
 def _detect_action_types_from_text(call_id: str, title: str) -> List[str]:
-    """Detect action types from call ID or title."""
     text = f"{call_id} {title}".upper()
     types = []
     if "MSCA" in text and "DN" in text:
@@ -224,22 +206,332 @@ def _detect_action_types_from_text(call_id: str, title: str) -> List[str]:
     return types
 
 
+# ═══════════════════════════════════════════════════════════
+# EURESEARCH SCRAPER
+# ═══════════════════════════════════════════════════════════
+EURESEARCH_URL = "https://www.euresearch.ch/en/our-services/inform/open-calls-137.html"
+
+
+def fetch_euresearch_calls(max_retries: int = 2) -> List[Dict]:
+    """Scrape open calls from Euresearch website."""
+    if not HAS_BS4:
+        return []
+
+    headers = {
+        "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 "
+                       "(KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36",
+        "Accept": "text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8",
+        "Accept-Language": "en-US,en;q=0.9",
+    }
+
+    for attempt in range(max_retries):
+        try:
+            resp = requests.get(EURESEARCH_URL, headers=headers, timeout=20)
+            resp.raise_for_status()
+            return _parse_euresearch_html(resp.text)
+        except Exception:
+            if attempt < max_retries - 1:
+                time.sleep(2)
+    return []
+
+
+def _parse_euresearch_html(html: str) -> List[Dict]:
+    """Parse Euresearch HTML page for call data."""
+    soup = BeautifulSoup(html, "html.parser")
+    calls = []
+
+    # Try multiple CSS selectors for robustness
+    rows = (
+        soup.select("table.views-table tbody tr")
+        or soup.select("div.view-content div.views-row")
+        or soup.select("table tbody tr")
+        or soup.select("div.field-content")
+    )
+
+    if not rows:
+        # Fallback: try to find any table
+        tables = soup.find_all("table")
+        for table in tables:
+            trs = table.find_all("tr")
+            for tr in trs[1:]:  # Skip header
+                call = _parse_euresearch_row_from_cells(tr.find_all("td"))
+                if call:
+                    calls.append(call)
+        if calls:
+            return calls
+
+        # Fallback 2: regex-based extraction from raw text
+        return _parse_euresearch_from_text(soup.get_text())
+
+    for row in rows:
+        call = _parse_euresearch_row(row)
+        if call:
+            calls.append(call)
+
+    return calls
+
+
+def _parse_euresearch_row(row) -> Optional[Dict]:
+    """Parse a single row/card from Euresearch."""
+    cells = row.find_all("td")
+    if cells:
+        return _parse_euresearch_row_from_cells(cells)
+
+    # Card-style layout
+    title_el = row.find(["h3", "h4", "a", "strong"])
+    title = title_el.get_text(strip=True) if title_el else ""
+    if not title:
+        return None
+
+    full_text = row.get_text(" ", strip=True)
+
+    # Extract deadline
+    deadline = ""
+    date_match = re.search(r'(\d{1,2}[./]\d{1,2}[./]\d{2,4})', full_text)
+    if date_match:
+        deadline = _normalize_date(date_match.group(1))
+    else:
+        date_match = re.search(r'(\d{4}-\d{2}-\d{2})', full_text)
+        if date_match:
+            deadline = date_match.group(1)
+
+    # Extract call ID
+    call_id = ""
+    id_match = re.search(r'(HORIZON[-\w]+|ERC[-\w]+|EIC[-\w]+|MSCA[-\w]+)', full_text)
+    if id_match:
+        call_id = id_match.group(1)
+    else:
+        call_id = "EUR-" + re.sub(r'\W+', '-', title[:40]).strip('-').upper()
+
+    # Extract link
+    link = ""
+    a_tag = row.find("a", href=True)
+    if a_tag:
+        href = a_tag["href"]
+        if not href.startswith("http"):
+            href = "https://www.euresearch.ch" + href
+        link = href
+
+    action_types = _detect_action_types_from_text(call_id, title)
+
+    return {
+        "call_id": call_id,
+        "title": title,
+        "status": "Open",
+        "deadline": deadline,
+        "action_types": action_types if action_types else ["RIA"],
+        "topics": [],
+        "budget_per_project": "",
+        "description": full_text[:500],
+        "source": "Euresearch",
+        "link": link,
+        "destination": "",
+        "keywords": [],
+        "expected_outcomes": "",
+        "scope": "",
+    }
+
+
+def _parse_euresearch_row_from_cells(cells) -> Optional[Dict]:
+    """Parse table cells into a call dict."""
+    if len(cells) < 2:
+        return None
+
+    texts = [c.get_text(strip=True) for c in cells]
+    title = texts[0] if texts else ""
+    if not title or len(title) < 5:
+        return None
+
+    # Try to find deadline in cells
+    deadline = ""
+    call_id = ""
+    for t in texts:
+        date_m = re.search(r'(\d{1,2}[./]\d{1,2}[./]\d{2,4})', t)
+        if date_m:
+            deadline = _normalize_date(date_m.group(1))
+        date_m2 = re.search(r'(\d{4}-\d{2}-\d{2})', t)
+        if date_m2:
+            deadline = date_m2.group(1)
+        id_m = re.search(r'(HORIZON[-\w]+|ERC[-\w]+|EIC[-\w]+|MSCA[-\w]+)', t)
+        if id_m:
+            call_id = id_m.group(1)
+
+    if not call_id:
+        call_id = "EUR-" + re.sub(r'\W+', '-', title[:40]).strip('-').upper()
+
+    link = ""
+    for c in cells:
+        a = c.find("a", href=True)
+        if a:
+            href = a["href"]
+            if not href.startswith("http"):
+                href = "https://www.euresearch.ch" + href
+            link = href
+            break
+
+    action_types = _detect_action_types_from_text(call_id, title)
+
+    return {
+        "call_id": call_id,
+        "title": title,
+        "status": "Open",
+        "deadline": deadline,
+        "action_types": action_types if action_types else ["RIA"],
+        "topics": [],
+        "budget_per_project": texts[2] if len(texts) > 2 else "",
+        "description": " | ".join(texts),
+        "source": "Euresearch",
+        "link": link,
+        "destination": texts[1] if len(texts) > 1 else "",
+        "keywords": [],
+        "expected_outcomes": "",
+        "scope": "",
+    }
+
+
+def _parse_euresearch_from_text(text: str) -> List[Dict]:
+    """Fallback: extract calls from raw text using regex patterns."""
+    calls = []
+    lines = text.split("\n")
+    current = {}
+
+    for line in lines:
+        line = line.strip()
+        if not line:
+            if current.get("title"):
+                calls.append(current)
+                current = {}
+            continue
+
+        # Look for call IDs
+        id_match = re.search(r'(HORIZON[-\w]+|ERC[-\w]+|EIC[-\w]+|MSCA[-\w]+)', line)
+        if id_match:
+            if current.get("title"):
+                calls.append(current)
+            current = {
+                "call_id": id_match.group(1),
+                "title": line[:150],
+                "status": "Open",
+                "deadline": "",
+                "action_types": _detect_action_types_from_text(id_match.group(1), line),
+                "topics": [],
+                "source": "Euresearch",
+                "keywords": [],
+                "expected_outcomes": "",
+                "scope": "",
+                "description": "",
+                "budget_per_project": "",
+                "link": "",
+                "destination": "",
+            }
+
+        # Look for dates
+        date_match = re.search(r'(\d{1,2}[./]\d{1,2}[./]\d{2,4})', line)
+        if date_match and current:
+            current["deadline"] = _normalize_date(date_match.group(1))
+        date_match2 = re.search(r'(\d{4}-\d{2}-\d{2})', line)
+        if date_match2 and current:
+            current["deadline"] = date_match2.group(1)
+
+    if current.get("title"):
+        calls.append(current)
+
+    return calls
+
+
+def _normalize_date(date_str: str) -> str:
+    """Normalize date string to YYYY-MM-DD."""
+    for fmt in ("%d.%m.%Y", "%d/%m/%Y", "%d.%m.%y", "%d/%m/%y", "%m/%d/%Y", "%Y-%m-%d"):
+        try:
+            dt = datetime.strptime(date_str, fmt)
+            return dt.strftime("%Y-%m-%d")
+        except ValueError:
+            continue
+    return date_str
+
+
+# ═══════════════════════════════════════════════════════════
+# COMBINED FETCH (EC API + Euresearch + Local DB)
+# ═══════════════════════════════════════════════════════════
+def fetch_all_calls(
+    search_text: str = "",
+    status_filter: str = "",
+    use_ec_api: bool = True,
+    use_euresearch: bool = True,
+    max_api_results: int = 100,
+) -> Tuple[List[Dict], Dict]:
+    """
+    Fetch calls from all sources and merge.
+    Returns (calls_list, source_stats).
+    """
+    all_calls = []
+    stats = {"ec_api": 0, "euresearch": 0, "local_db": 0, "total": 0}
+
+    # 1. EC API
+    if use_ec_api:
+        try:
+            api_calls, _ = fetch_horizon_calls(
+                programme="HORIZON",
+                status=status_filter,
+                search_text=search_text,
+                page_size=100,
+                max_pages=max(1, max_api_results // 100),
+                fetch_all=True,
+            )
+            all_calls.extend(api_calls)
+            stats["ec_api"] = len(api_calls)
+        except Exception:
+            pass
+
+    # 2. Euresearch
+    if use_euresearch:
+        try:
+            eur_calls = fetch_euresearch_calls()
+            all_calls.extend(eur_calls)
+            stats["euresearch"] = len(eur_calls)
+        except Exception:
+            pass
+
+    # 3. Local DB (fill gaps)
+    from call_db import HORIZON_CALLS_DB
+    existing_ids = set(c.get("call_id", "") for c in all_calls)
+    local_added = 0
+    for lc in HORIZON_CALLS_DB:
+        if lc["call_id"] not in existing_ids:
+            lc_copy = {**lc, "source": "Local DB"}
+            all_calls.append(lc_copy)
+            existing_ids.add(lc["call_id"])
+            local_added += 1
+    stats["local_db"] = local_added
+
+    # Deduplicate
+    seen = set()
+    unique = []
+    for c in all_calls:
+        cid = c.get("call_id", "")
+        if cid and cid not in seen:
+            seen.add(cid)
+            unique.append(c)
+
+    stats["total"] = len(unique)
+    return unique, stats
+
+
+# ═══════════════════════════════════════════════════════════
+# TOPIC DETAILS
+# ═══════════════════════════════════════════════════════════
 def fetch_topic_details(topic_id: str) -> Optional[Dict]:
-    """Fetch detailed topic information from EC API."""
     params = {
         "apiKey": "SEDIA",
         "text": f'"{topic_id}"',
         "type": "1",
         "pageSize": "5",
     }
-
     try:
         resp = requests.get(EC_API_BASE, params=params, timeout=20)
         resp.raise_for_status()
         data = resp.json()
-        results = data.get("results", [])
-
-        for item in results:
+        for item in data.get("results", []):
             meta = item.get("metadata", {})
             identifier = _extract_field(meta, "identifier") or ""
             if topic_id.lower() in identifier.lower():
@@ -252,16 +544,16 @@ def fetch_topic_details(topic_id: str) -> Optional[Dict]:
                 }
     except Exception:
         pass
-
     return None
 
 
+# ═══════════════════════════════════════════════════════════
+# HELPERS
+# ═══════════════════════════════════════════════════════════
 def detect_action_type_from_call(call_data: Dict) -> str:
-    """Detect action type from call data."""
     action_types = call_data.get("action_types", [])
     if action_types:
         return action_types[0]
-
     text = f"{call_data.get('call_id', '')} {call_data.get('title', '')}".upper()
     if "MSCA" in text and "DN" in text:
         return "MSCA-DN"
@@ -279,58 +571,48 @@ def detect_action_type_from_call(call_data: Dict) -> str:
 
 
 def build_call_specific_criteria(call_data: Dict, topic_details: Optional[Dict] = None) -> Dict:
-    """Build evaluation context from call + topic data."""
-    context_parts = [
+    parts = [
         f"Call: {call_data.get('call_id', 'N/A')}",
         f"Title: {call_data.get('title', 'N/A')}",
         f"Action Types: {', '.join(call_data.get('action_types', []))}",
         f"Deadline: {call_data.get('deadline', 'N/A')}",
+        f"Source: {call_data.get('source', 'N/A')}",
     ]
-
     if call_data.get("description"):
-        context_parts.append(f"\nCall Description:\n{call_data['description'][:2000]}")
-
+        parts.append(f"\nCall Description:\n{call_data['description'][:2000]}")
     if topic_details:
         if topic_details.get("description"):
-            context_parts.append(f"\nTopic Description:\n{topic_details['description'][:3000]}")
+            parts.append(f"\nTopic Description:\n{topic_details['description'][:3000]}")
         if topic_details.get("conditions"):
-            context_parts.append(f"\nConditions:\n{topic_details['conditions'][:1000]}")
-
-    action_type = detect_action_type_from_call(call_data)
+            parts.append(f"\nConditions:\n{topic_details['conditions'][:1000]}")
 
     return {
-        "action_type": action_type,
-        "evaluation_context": "\n".join(context_parts),
+        "action_type": detect_action_type_from_call(call_data),
+        "evaluation_context": "\n".join(parts),
         "call_id": call_data.get("call_id", ""),
         "deadline": call_data.get("deadline", ""),
     }
 
 
 def calls_to_excel_bytes(calls: List[Dict]) -> bytes:
-    """Convert calls list to Excel bytes for download."""
     if HAS_OPENPYXL:
         wb = openpyxl.Workbook()
         ws = wb.active
         ws.title = "Horizon Calls"
 
-        # Header
-        headers = [
-            "Call ID", "Title", "Status", "Deadline",
-            "Action Types", "Destination", "Budget",
-            "Expected Outcomes", "Scope", "Keywords",
-        ]
+        headers = ["Call ID", "Title", "Status", "Deadline", "Action Types",
+                    "Destination", "Budget", "Source", "Link",
+                    "Expected Outcomes", "Scope", "Keywords"]
         ws.append(headers)
 
-        # Style header
         from openpyxl.styles import Font, PatternFill, Alignment
-        header_font = Font(bold=True, color="FFFFFF", size=11)
-        header_fill = PatternFill(start_color="4F46E5", end_color="4F46E5", fill_type="solid")
-        for col_idx, cell in enumerate(ws[1], 1):
-            cell.font = header_font
-            cell.fill = header_fill
+        hfont = Font(bold=True, color="FFFFFF", size=11)
+        hfill = PatternFill(start_color="4F46E5", end_color="4F46E5", fill_type="solid")
+        for cell in ws[1]:
+            cell.font = hfont
+            cell.fill = hfill
             cell.alignment = Alignment(horizontal="center")
 
-        # Data rows
         for call in calls:
             ws.append([
                 call.get("call_id", ""),
@@ -340,38 +622,37 @@ def calls_to_excel_bytes(calls: List[Dict]) -> bytes:
                 ", ".join(call.get("action_types", [])),
                 call.get("destination", ""),
                 call.get("budget_per_project", call.get("budget_total", "")),
+                call.get("source", ""),
+                call.get("link", ""),
                 call.get("expected_outcomes", ""),
                 call.get("scope", ""),
                 ", ".join(call.get("keywords", [])),
             ])
 
-        # Auto-width
         for col in ws.columns:
-            max_length = 0
-            col_letter = col[0].column_letter
+            max_len = 0
+            letter = col[0].column_letter
             for cell in col:
                 try:
-                    if len(str(cell.value)) > max_length:
-                        max_length = len(str(cell.value))
+                    if len(str(cell.value)) > max_len:
+                        max_len = len(str(cell.value))
                 except Exception:
                     pass
-            ws.column_dimensions[col_letter].width = min(max_length + 2, 50)
+            ws.column_dimensions[letter].width = min(max_len + 2, 50)
 
         buf = io.BytesIO()
         wb.save(buf)
         return buf.getvalue()
     else:
-        # Fallback: CSV as bytes
         import csv
         buf = io.StringIO()
         writer = csv.writer(buf)
-        writer.writerow(["Call ID", "Title", "Status", "Deadline", "Action Types"])
+        writer.writerow(["Call ID", "Title", "Status", "Deadline", "Action Types", "Source"])
         for call in calls:
             writer.writerow([
-                call.get("call_id", ""),
-                call.get("title", ""),
-                call.get("status", ""),
-                call.get("deadline", ""),
+                call.get("call_id", ""), call.get("title", ""),
+                call.get("status", ""), call.get("deadline", ""),
                 ", ".join(call.get("action_types", [])),
+                call.get("source", ""),
             ])
         return buf.getvalue().encode("utf-8")
