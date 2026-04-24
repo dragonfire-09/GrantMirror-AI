@@ -1370,18 +1370,17 @@ def render_feature_dashboard():
 
     st.divider()
 
-    c1, c2 = st.columns(3)
+c1, c2 = st.columns(2)
 
-    with c1:
-        if st.button("📡 Canlı Çağrılara Git", use_container_width=True):
-            st.session_state["nav"] = "📡 Canlı Çağrılar"
-            st.rerun()
+with c1:
+    if st.button("📡 Canlı Çağrılara Git", use_container_width=True):
+        st.session_state["nav"] = "📡 Canlı Çağrılar"
+        st.rerun()
 
-
-    with c2:
-        if st.button("📰 Haberleri Aç", use_container_width=True):
-            st.session_state["nav"] = "📰 Haberler"
-            st.rerun()
+with c2:
+    if st.button("📰 Haberleri Aç", use_container_width=True):
+        st.session_state["nav"] = "📰 Haberler"
+        st.rerun()
     
 def render_evaluation_page():
     with st.sidebar:
