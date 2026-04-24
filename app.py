@@ -1754,8 +1754,8 @@ def main():
             )
 
     if page == "📡 Canlı Çağrılar":
-        try:
-            render_calls_page()
+    try:
+        render_calls_page()
     except Exception as e:
         st.error("Canlı Çağrılar sayfasında hata var.")
         st.exception(e)
