@@ -343,3 +343,51 @@ def generate_quick_summary(results: Dict) -> str:
         f"({met} threshold {results.get('total_threshold', 0)}). "
         f"Funding probability: **{prob}**."
     )
+    def markdown_to_pdf_bytes(markdown_text: str) -> bytes:
+    from reportlab.lib.pagesizes import A4
+    from reportlab.platypus import SimpleDocTemplate, Paragraph, Spacer
+    from reportlab.lib.styles import getSampleStyleSheet
+    from reportlab.lib.units import cm
+    from io import BytesIO
+    import re
+
+    buffer = BytesIO()
+
+    doc = SimpleDocTemplate(
+        buffer,
+        pagesize=A4,
+        rightMargin=1.8 * cm,
+        leftMargin=1.8 * cm,
+        topMargin=1.6 * cm,
+        bottomMargin=1.6 * cm,
+    )
+
+    styles = getSampleStyleSheet()
+    story = []
+
+    lines = markdown_text.splitlines()
+
+    for line in lines:
+        line = line.strip()
+
+        if not line:
+            story.append(Spacer(1, 8))
+            continue
+
+        line = re.sub(r"\*\*(.*?)\*\*", r"<b>\1</b>", line)
+        line = re.sub(r"^# (.*)", r"<b><font size='16'>\1</font></b>", line)
+        line = re.sub(r"^## (.*)", r"<b><font size='13'>\1</font></b>", line)
+        line = re.sub(r"^### (.*)", r"<b>\1</b>", line)
+        line = line.replace("|", " | ")
+
+        if line.startswith("- "):
+            line = "• " + line[2:]
+
+        story.append(Paragraph(line, styles["BodyText"]))
+
+    doc.build(story)
+
+    pdf = buffer.getvalue()
+    buffer.close()
+
+    return pdf
