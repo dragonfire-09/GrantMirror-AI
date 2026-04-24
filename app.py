@@ -726,7 +726,7 @@ def render_call_dashboard():
         calls, src_stats = cached
     else:
         with st.spinner("📡 Çağrılar çekiliyor (EC API + Euresearch + UfukAvrupa + DB)..."):
-            calls, src_stats = fetch_all_calls(
+            calls, src_stats = fetch_horizon_calls(
                 search_text=search,
                 status_filter=status_filter,
                 use_ec_api=use_ec_api,
