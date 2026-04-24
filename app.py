@@ -906,23 +906,31 @@ def render_call_dashboard():
         st.warning(f"Excel export hazırlanamadı: {e}")
 
     selected_call = None
+    
+# Pagination
+page = st.number_input("Sayfa", 1, (len(calls) // 6) + 1, 1)
 
-    for i, call in enumerate(calls):
-        status = call.get("status", "Unknown")
+start = (page - 1) * 6
+end = start + 6
 
-        status_icon = {
-            "Open": "🟢",
-            "Forthcoming": "🟡",
-            "Closed": "🔴",
-        }.get(status, "⚪")
+calls = calls[start:end]
 
-        call_id = call.get("call_id", "N/A")
-        title = call.get("title", "N/A")
-        deadline = call.get("deadline", "N/A")
-        action_types = ", ".join(call.get("action_types", [])) or "N/A"
-        source = call.get("source", "N/A")
-        url = call.get("url", "")
+for i, call in enumerate(calls):
+    status = call.get("status", "Unknown")
 
+    status_icon = {
+        "Open": "🟢",
+        "Forthcoming": "🟡",
+        "Closed": "🔴",
+    }.get(status, "⚪")
+
+    call_id = call.get("call_id", "N/A")
+    title = call.get("title", "N/A")
+    deadline = call.get("deadline", "N/A")
+    action_types = ", ".join(call.get("action_types", [])) or "N/A"
+    source = call.get("source", "N/A")
+    url = call.get("url", "")
+    
         with st.container():
             st.markdown(
                 f"""
