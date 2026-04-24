@@ -948,7 +948,7 @@ def render_call_dashboard():
 
             with c1:
                 if url:
-                    st.markdown(f"[🔗 Detay]({url})")
+                    st.markdown(f"[🔗 EU Portal Detay]({url})")
 
             with c2:
                 if st.button("Seç →", key=f"select_call_{i}", use_container_width=True):
