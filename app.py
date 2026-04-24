@@ -44,8 +44,7 @@ st.markdown("""<style>
 html,body,[class*="css"]{font-family:'Inter',-apple-system,sans-serif!important}
 .stApp{background:#f8fafc}
 section[data-testid="stSidebar"]{background:linear-gradient(180deg,#1e1b4b,#312e81,#3730a3)!important}
-section[data-testid="stSidebar"] *{color:#e0e7ff!important}
-section[data-testid="stSidebar"] .stMarkdown h2{color:#fff!important;font-weight:700!important}
+section[data-testid="stSidebar"] *{color:#e0e7ff!important}section[data-testid="stSidebar"] .stMarkdown h2{color:#fff!important;font-weight:700!important}
 section[data-testid="stSidebar"] hr{border-color:rgba(165,180,252,.2)!important}
 section[data-testid="stSidebar"] .stExpander{background:rgba(255,255,255,.06)!important;border:1px solid rgba(255,255,255,.1)!important;border-radius:10px!important}
 div[data-testid="stMetricValue"]{font-weight:700!important;font-size:1.4rem!important}
