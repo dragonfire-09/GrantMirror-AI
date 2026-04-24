@@ -1336,51 +1336,44 @@ def render_news_page():
 # ═══════════════════════════════════════════════════════════
 def render_feature_dashboard():
     st.markdown("## 🎯 GrantMirror-AI Ne Yapar?")
-    st.caption("Horizon Europe tekliflerini çağrı uyumu, hakem değerlendirmesi ve fonlanma olasılığı açısından analiz eder.")
+    st.caption(
+        "Horizon Europe tekliflerini çağrı uyumu, hakem değerlendirmesi ve fonlanma olasılığı açısından analiz eder."
+    )
 
     features = [
-        ("📡", "Canlı Çağrı", "EC API üzerinden güncel Horizon çağrılarını çeker.", "📡 Canlı Çağrılar"),
-        ("🎯", "AI Eşleştirme", "Proje fikrini en uygun çağrılarla eşleştirir.", "📡 Canlı Çağrılar"),
-        ("🧠", "RAG Motor", "Kriter ve rehber bilgisini birlikte yorumlar.", "🔬 Değerlendirme"),
-        ("📋", "ESR Simülasyon", "Hakem formatına yakın değerlendirme üretir.", "🔬 Değerlendirme"),
-        ("🛠️", "Koçluk", "Zayıf noktalar için düzeltme önerileri verir.", "🔬 Değerlendirme"),
-        ("📊", "Güven Aralığı", "Puan ve fonlanma olasılığı tahmini üretir.", "🔬 Değerlendirme"),
-        ("🔒", "Kimlik Taraması", "Kör değerlendirme risklerini kontrol eder.", "🔬 Değerlendirme"),
-        ("📰", "Canlı Haberler", "EU ve UfukAvrupa haberlerini izler.", "📰 Haberler"),
+        ("📡", "Canlı Çağrı", "EC API üzerinden güncel Horizon çağrılarını çeker."),
+        ("🎯", "AI Eşleştirme", "Proje fikrini en uygun çağrılarla eşleştirir."),
+        ("🧠", "RAG Motor", "Kriter ve rehber bilgisini birlikte yorumlar."),
+        ("📋", "ESR Simülasyon", "Hakem formatına yakın değerlendirme üretir."),
+        ("🛠️", "Koçluk", "Zayıf noktalar için düzeltme önerileri verir."),
+        ("📊", "Güven Aralığı", "Puan ve fonlanma olasılığı tahmini üretir."),
+        ("🔒", "Kimlik Taraması", "Kör değerlendirme risklerini kontrol eder."),
+        ("📰", "Canlı Haberler", "EU ve UfukAvrupa haberlerini izler."),
     ]
 
     rows = [features[:4], features[4:]]
 
     for row in rows:
         cols = st.columns(4)
-
-        for col, (icon, title, desc, target_page) in zip(cols, row):
+        for col, (icon, title, desc) in zip(cols, row):
             with col:
                 with st.container(border=True):
                     st.markdown(f"### {icon} {title}")
                     st.write(desc)
 
-                    if st.button(
-                        f"{title} aç",
-                        key=f"open_{title}",
-                        use_container_width=True,
-                    ):
-                        st.session_state["nav"] = target_page
-                        st.rerun()
-
     st.divider()
 
-c1, c2 = st.columns(2)
+    c1, c2 = st.columns(2)
 
-with c1:
-    if st.button("📡 Canlı Çağrılara Git", use_container_width=True):
-        st.session_state["nav"] = "📡 Canlı Çağrılar"
-        st.rerun()
+    with c1:
+        if st.button("📡 Canlı Çağrılara Git", use_container_width=True):
+            st.session_state["nav"] = "📡 Canlı Çağrılar"
+            st.rerun()
 
-with c2:
-    if st.button("📰 Haberleri Aç", use_container_width=True):
-        st.session_state["nav"] = "📰 Haberler"
-        st.rerun()
+    with c2:
+        if st.button("📰 Haberleri Aç", use_container_width=True):
+            st.session_state["nav"] = "📰 Haberler"
+            st.rerun()
     
 def render_evaluation_page():
     with st.sidebar:
