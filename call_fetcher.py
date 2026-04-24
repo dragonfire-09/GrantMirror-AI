@@ -1,11 +1,12 @@
 """
 call_fetcher.py — Horizon Europe Çağrı Çekici
-EC API + Euresearch Scraper + UfukAvrupa + Yerel DB
+EC Funding & Tenders API + Euresearch + UfukAvrupa + Yerel DB
 """
 import requests
 import time
 import re
 import hashlib
+import json
 from datetime import datetime, timedelta
 from typing import Dict, List, Optional, Tuple
 from io import BytesIO
@@ -47,8 +48,12 @@ class CallCache:
 # ═══════════════════════════════════════════════════════════
 # HTML TEMİZLEYİCİ
 # ═══════════════════════════════════════════════════════════
-def clean_html(text: str) -> str:
+def clean_html(text) -> str:
     """HTML etiketlerini ve entity'leri temizle."""
+    if text is None:
+        return ""
+    if not isinstance(text, str):
+        text = str(text)
     if not text:
         return ""
     if HAS_BS4:
@@ -57,7 +62,6 @@ def clean_html(text: str) -> str:
             return soup.get_text(separator=" ", strip=True)
         except Exception:
             pass
-    # Fallback: regex
     text = re.sub(r'<br\s*/?>', ' ', text)
     text = re.sub(r'<[^>]+>', '', text)
     text = re.sub(r'&nbsp;', ' ', text)
@@ -73,36 +77,47 @@ def clean_html(text: str) -> str:
 
 
 # ═══════════════════════════════════════════════════════════
-# EC FUNDING & TENDERS API
+# EC FUNDING & TENDERS API — DÜZELTİLMİŞ
 # ═══════════════════════════════════════════════════════════
 EC_SEARCH_URL = "https://api.tech.ec.europa.eu/search-api/prod/rest/search"
 
-def _extract_ec_field(metadata: dict, field_name: str) -> str:
-    """EC API metadata'dan alan çıkar."""
-    for key, values in metadata.items():
-        if field_name.lower() in key.lower():
-            if isinstance(values, list) and values:
-                v = values[0]
-                if isinstance(v, dict):
-                    return str(v.get("value", ""))
-                return str(v)
-            elif isinstance(values, str):
-                return values
+
+def _safe_str(val) -> str:
+    """Herhangi bir değeri güvenli string'e çevir."""
+    if val is None:
+        return ""
+    if isinstance(val, list):
+        parts = []
+        for v in val:
+            if isinstance(v, dict):
+                parts.append(str(v.get("value", v.get("code", ""))))
+            else:
+                parts.append(str(v))
+        return ", ".join(parts)
+    if isinstance(val, dict):
+        return str(val.get("value", val.get("code", "")))
+    return str(val)
+
+
+def _extract_ec_field(metadata: dict, *field_names) -> str:
+    """EC API metadata'dan alan çıkar — birden fazla olası isim dener."""
+    for target in field_names:
+        target_lower = target.lower()
+        for key, values in metadata.items():
+            if target_lower in key.lower():
+                return clean_html(_safe_str(values))
     return ""
 
 
-def _extract_ec_list(metadata: dict, field_name: str) -> List[str]:
+def _extract_ec_list(metadata: dict, *field_names) -> List[str]:
     """EC API metadata'dan liste çıkar."""
-    for key, values in metadata.items():
-        if field_name.lower() in key.lower():
-            if isinstance(values, list):
-                result = []
-                for v in values:
-                    if isinstance(v, dict):
-                        result.append(str(v.get("value", "")))
-                    else:
-                        result.append(str(v))
-                return result
+    for target in field_names:
+        target_lower = target.lower()
+        for key, values in metadata.items():
+            if target_lower in key.lower():
+                if isinstance(values, list):
+                    return [clean_html(_safe_str(v)) for v in values if v]
+                return [clean_html(_safe_str(values))]
     return []
 
 
@@ -110,475 +125,300 @@ def fetch_horizon_calls(
     search_text: str = "",
     status: str = "",
     max_results: int = 100,
-) -> List[Dict]:
-    """EC Funding & Tenders API'den Horizon Europe çağrılarını çek."""
+) -> Tuple[List[Dict], dict]:
+    """
+    EC Funding & Tenders API'den Horizon Europe çağrılarını çek.
+    Birden fazla sorgu stratejisi dener.
+    """
     calls = []
-    try:
-        query_parts = [
-            "programmePeriod/code='2021-2027'",
-            "frameworkProgramme/code='43108390'",
-        ]
-        if status:
-            status_map = {
-                "open": "31094501",
-                "forthcoming": "31094502",
-                "closed": "31094503",
-            }
-            sc = status_map.get(status.lower(), "")
-            if sc:
-                query_parts.append(f"status/code='{sc}'")
+    debug_info = {"attempts": [], "success": False, "total_api": 0}
 
-        query = " AND ".join(query_parts)
-
-        page_size = min(max_results, 100)
-        pages_needed = (max_results + page_size - 1) // page_size
-
-        for page_num in range(1, pages_needed + 1):
-            params = {
+    # Strateji 1: Yeni API formatı
+    strategies = [
+        {
+            "name": "strategy_1_framework",
+            "params": {
+                "apiKey": "SEDIA",
+                "text": search_text if search_text else "horizon europe",
+                "pageSize": str(min(max_results, 100)),
+                "pageNumber": "1",
+                "type": "1",
+                "sortBy": "sortStatus:asc,deadlineDate:desc",
+            },
+        },
+        {
+            "name": "strategy_2_query",
+            "params": {
                 "apiKey": "SEDIA",
                 "text": search_text if search_text else "*",
-                "pageSize": str(page_size),
-                "pageNumber": str(page_num),
+                "pageSize": str(min(max_results, 100)),
+                "pageNumber": "1",
                 "sortBy": "deadlineDate:desc",
-                "query": query,
-            }
+                "query": (
+                    "frameworkProgramme/code='43108390'"
+                ),
+            },
+        },
+        {
+            "name": "strategy_3_programme_period",
+            "params": {
+                "apiKey": "SEDIA",
+                "text": search_text if search_text else "*",
+                "pageSize": str(min(max_results, 100)),
+                "pageNumber": "1",
+                "sortBy": "deadlineDate:desc",
+                "query": (
+                    "programmePeriod/code='2021-2027' AND "
+                    "frameworkProgramme/code='43108390'"
+                ),
+            },
+        },
+        {
+            "name": "strategy_4_simple",
+            "params": {
+                "apiKey": "SEDIA",
+                "text": "HORIZON" if not search_text else f"HORIZON {search_text}",
+                "pageSize": str(min(max_results, 100)),
+                "pageNumber": "1",
+                "sortBy": "deadlineDate:desc",
+            },
+        },
+    ]
 
-            resp = requests.get(EC_SEARCH_URL, params=params, timeout=20)
+    for strategy in strategies:
+        try:
+            params = strategy["params"].copy()
+
+            # Status filtresi
+            if status:
+                status_map = {
+                    "open": "31094501",
+                    "forthcoming": "31094502",
+                    "closed": "31094503",
+                }
+                sc = status_map.get(status.lower(), "")
+                if sc:
+                    q = params.get("query", "")
+                    status_q = f"status/code='{sc}'"
+                    params["query"] = f"{q} AND {status_q}" if q else status_q
+
+            resp = requests.get(EC_SEARCH_URL, params=params, timeout=25)
+            debug_info["attempts"].append({
+                "strategy": strategy["name"],
+                "status_code": resp.status_code,
+                "url": resp.url[:200],
+            })
+
             if resp.status_code != 200:
-                break
+                continue
 
             data = resp.json()
             results = data.get("results", [])
-            if not results:
-                break
+            total_results = data.get("totalResults", 0)
 
+            debug_info["attempts"][-1]["total_results"] = total_results
+            debug_info["attempts"][-1]["returned"] = len(results)
+
+            if not results:
+                continue
+
+            # Sonuçları parse et
             for r in results:
                 meta = r.get("metadata", {})
+                call = _parse_ec_result(meta)
+                if call:
+                    calls.append(call)
 
-                call_id = clean_html(_extract_ec_field(meta, "identifier"))
-                title = clean_html(_extract_ec_field(meta, "title"))
-                status_val = clean_html(_extract_ec_field(meta, "status"))
-                deadline = clean_html(_extract_ec_field(meta, "deadlineDate"))
-                start_date = clean_html(_extract_ec_field(meta, "startDate"))
-                budget = clean_html(_extract_ec_field(meta, "budget"))
-                desc = clean_html(_extract_ec_field(meta, "description"))
-                types = _extract_ec_list(meta, "typesOfAction")
-                types = [clean_html(t) for t in types]
+            # Sayfalama — daha fazla sonuç varsa
+            if total_results > len(results) and len(calls) < max_results:
+                pages_needed = min(
+                    (max_results - len(calls) + 99) // 100,
+                    (total_results + 99) // 100,
+                    5,  # Maks 5 sayfa
+                )
+                for page in range(2, pages_needed + 1):
+                    try:
+                        params["pageNumber"] = str(page)
+                        resp2 = requests.get(
+                            EC_SEARCH_URL, params=params, timeout=25,
+                        )
+                        if resp2.status_code == 200:
+                            data2 = resp2.json()
+                            for r2 in data2.get("results", []):
+                                call2 = _parse_ec_result(r2.get("metadata", {}))
+                                if call2:
+                                    calls.append(call2)
+                        if len(calls) >= max_results:
+                            break
+                    except Exception:
+                        break
 
-                if not call_id and not title:
-                    continue
+            if calls:
+                debug_info["success"] = True
+                debug_info["total_api"] = len(calls)
+                break  # İlk başarılı strateji yeterli
 
-                # Status mapping
-                status_display = status_val
-                if "open" in status_val.lower() or "31094501" in status_val:
-                    status_display = "Open"
-                elif "forthcoming" in status_val.lower() or "31094502" in status_val:
-                    status_display = "Forthcoming"
-                elif "closed" in status_val.lower() or "31094503" in status_val:
-                    status_display = "Closed"
+        except Exception as e:
+            debug_info["attempts"][-1]["error"] = str(e)[:200]
+            continue
 
-                link = ""
-                if call_id:
-                    link = (
-                        f"https://ec.europa.eu/info/funding-tenders/"
-                        f"opportunities/portal/screen/opportunities/"
-                        f"topic-details/{call_id}"
-                    )
+    # Hiçbir strateji çalışmadıysa
+    if not calls:
+        debug_info["fallback"] = "no_results"
 
-                calls.append({
-                    "call_id": call_id or "N/A",
-                    "title": title or call_id or "N/A",
-                    "status": status_display,
-                    "deadline": deadline[:10] if deadline else "N/A",
-                    "start_date": start_date[:10] if start_date else "",
-                    "budget_total": budget,
-                    "budget_per_project": "",
-                    "action_types": types if types else ["RIA"],
-                    "description": desc[:500] if desc else "",
-                    "keywords": [],
-                    "destination": "",
-                    "scope": desc[:1000] if desc else "",
-                    "expected_outcomes": "",
-                    "link": link,
-                    "source": "EC API",
-                    "topics": [{"topic_id": call_id}] if call_id else [],
-                })
+    return calls[:max_results], debug_info
 
-            if len(results) < page_size:
-                break
-            if len(calls) >= max_results:
-                break
 
-    except Exception as e:
-        calls.append({
-            "call_id": "EC_API_ERROR",
-            "title": f"EC API Hatası: {str(e)[:100]}",
-            "status": "Error",
-            "deadline": "N/A",
-            "action_types": ["N/A"],
-            "source": "EC API",
-            "link": "",
-            "keywords": [],
-            "destination": "",
-            "scope": "",
-            "expected_outcomes": "",
-            "topics": [],
-            "budget_total": "",
+def _parse_ec_result(meta: dict) -> Optional[Dict]:
+    """Tek bir EC API sonucunu parse et."""
+    try:
+        call_id = _extract_ec_field(meta, "identifier", "callIdentifier", "topicIdentifier")
+        title = _extract_ec_field(meta, "title")
+
+        if not call_id and not title:
+            return None
+
+        status_raw = _extract_ec_field(meta, "status")
+        deadline = _extract_ec_field(meta, "deadlineDate", "deadlineDates")
+        start_date = _extract_ec_field(meta, "startDate", "openingDate")
+        budget = _extract_ec_field(meta, "budget", "budgetOverviewReference")
+        desc = _extract_ec_field(meta, "description", "smedescription")
+        programme = _extract_ec_field(meta, "programmeDivision", "destination")
+        types_list = _extract_ec_list(meta, "typesOfAction", "typeOfAction")
+        keywords_list = _extract_ec_list(meta, "keywords", "tags")
+
+        # Status normalleştir
+        status_display = _normalize_status(status_raw)
+
+        # Deadline normalleştir (sadece ilk tarih)
+        if deadline:
+            date_match = re.search(r'(\d{4}-\d{2}-\d{2})', deadline)
+            if date_match:
+                deadline = date_match.group(1)
+            else:
+                # Diğer formatlar
+                date_match2 = re.search(r'(\d{2})/(\d{2})/(\d{4})', deadline)
+                if date_match2:
+                    m, d, y = date_match2.groups()
+                    deadline = f"{y}-{m}-{d}"
+                else:
+                    deadline = deadline[:10] if len(deadline) >= 10 else "N/A"
+
+        # Action types
+        if not types_list:
+            types_list = _detect_action_types_from_text(call_id, title)
+
+        # Link
+        link = ""
+        if call_id:
+            # Temiz call_id (virgül varsa ilkini al)
+            clean_id = call_id.split(",")[0].strip()
+            link = (
+                f"https://ec.europa.eu/info/funding-tenders/"
+                f"opportunities/portal/screen/opportunities/"
+                f"topic-details/{clean_id}"
+            )
+
+        return {
+            "call_id": call_id or "N/A",
+            "title": title or call_id or "N/A",
+            "status": status_display,
+            "deadline": deadline if deadline else "N/A",
+            "start_date": start_date[:10] if start_date else "",
+            "budget_total": budget,
             "budget_per_project": "",
-            "description": str(e),
-            "start_date": "",
-        })
+            "action_types": types_list if types_list else ["RIA"],
+            "description": desc[:500] if desc else "",
+            "keywords": keywords_list,
+            "destination": programme,
+            "scope": desc[:1000] if desc else "",
+            "expected_outcomes": "",
+            "link": link,
+            "source": "EC API",
+            "topics": [{"topic_id": call_id.split(",")[0].strip()}] if call_id else [],
+        }
+    except Exception:
+        return None
 
-    return calls[:max_results]
+
+def _normalize_status(raw: str) -> str:
+    """Status string'i normalleştir."""
+    if not raw:
+        return "Open"
+    low = raw.lower()
+    if any(x in low for x in ["open", "31094501", "açık"]):
+        return "Open"
+    if any(x in low for x in ["forthcoming", "31094502", "upcoming", "yaklaşan"]):
+        return "Forthcoming"
+    if any(x in low for x in ["closed", "31094503", "kapan"]):
+        return "Closed"
+    return raw
+
+
+def _detect_action_types_from_text(call_id: str, title: str) -> List[str]:
+    """Call ID ve başlıktan aksiyon türü tespit et."""
+    combined = (call_id + " " + title).upper()
+    types = []
+    patterns = [
+        ("ERC-StG", r'ERC.{0,10}(STG|STARTING)'),
+        ("ERC-CoG", r'ERC.{0,10}(COG|CONSOLIDATOR)'),
+        ("ERC-AdG", r'ERC.{0,10}(ADG|ADVANCED)'),
+        ("ERC-PoC", r'ERC.{0,10}(POC|PROOF)'),
+        ("MSCA-DN", r'MSCA.{0,10}(DN|DOCTORAL)'),
+        ("MSCA-PF", r'MSCA.{0,10}(PF|POSTDOC)'),
+        ("EIC-Pathfinder", r'EIC.{0,10}PATHFINDER'),
+        ("EIC-Accelerator", r'EIC.{0,10}ACCELERATOR'),
+        ("CSA", r'\bCSA\b'),
+        ("IA", r'\bIA\b'),
+        ("RIA", r'\bRIA\b'),
+    ]
+    for name, pattern in patterns:
+        if re.search(pattern, combined):
+            types.append(name)
+    return types if types else ["RIA"]
 
 
 def fetch_topic_details(topic_id: str) -> Optional[Dict]:
     """Tek bir topic'in detaylarını çek."""
+    if not topic_id or topic_id == "N/A":
+        return None
     try:
+        # Strateji 1: identifier ile
         params = {
             "apiKey": "SEDIA",
             "text": f'"{topic_id}"',
-            "pageSize": "1",
+            "pageSize": "5",
             "pageNumber": "1",
-            "query": f"identifier/code='{topic_id}'",
         }
         resp = requests.get(EC_SEARCH_URL, params=params, timeout=15)
         if resp.status_code == 200:
             data = resp.json()
             results = data.get("results", [])
-            if results:
-                meta = results[0].get("metadata", {})
-                return {
-                    "topic_id": topic_id,
-                    "title": clean_html(_extract_ec_field(meta, "title")),
-                    "description": clean_html(_extract_ec_field(meta, "description")),
-                    "budget": clean_html(_extract_ec_field(meta, "budget")),
-                    "deadline": clean_html(_extract_ec_field(meta, "deadlineDate")),
-                    "conditions": clean_html(_extract_ec_field(meta, "conditions")),
-                }
+            for r in results:
+                meta = r.get("metadata", {})
+                found_id = _extract_ec_field(meta, "identifier")
+                if topic_id.lower() in found_id.lower():
+                    return {
+                        "topic_id": topic_id,
+                        "title": _extract_ec_field(meta, "title"),
+                        "description": _extract_ec_field(meta, "description"),
+                        "budget": _extract_ec_field(meta, "budget"),
+                        "deadline": _extract_ec_field(meta, "deadlineDate"),
+                        "conditions": _extract_ec_field(meta, "conditions"),
+                    }
     except Exception:
         pass
     return None
 
 
 # ═══════════════════════════════════════════════════════════
-# EURESEARCH SCRAPER — DÜZELTİLMİŞ
+# EURESEARCH SCRAPER
 # ═══════════════════════════════════════════════════════════
 EURESEARCH_URL = "https://www.euresearch.ch/en/our-services/inform/open-calls-137.html"
 
 
 def fetch_euresearch_calls(max_results: int = 50) -> List[Dict]:
-    """Euresearch.ch'den açık çağrıları scrape et — HTML temizlenmiş."""
-    if not HAS_BS4:
-        return []
-
-    calls = []
-    try:
-        headers = {
-            "User-Agent": (
-                "Mozilla/5.0 (Windows NT 10.0; Win64; x64) "
-                "AppleWebKit/537.36 (KHTML, like Gecko) "
-                "Chrome/120.0.0.0 Safari/537.36"
-            ),
-            "Accept": "text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8",
-            "Accept-Language": "en-US,en;q=0.5",
-        }
-        resp = requests.get(EURESEARCH_URL, headers=headers, timeout=20)
-        if resp.status_code != 200:
-            return []
-
-        soup = BeautifulSoup(resp.text, "html.parser")
-
-        # Euresearch yapısını tara — çeşitli CSS seçiciler dene
-        call_containers = (
-            soup.select(".call-item")
-            or soup.select(".view-content .views-row")
-            or soup.select("article.node")
-            or soup.select(".field-content")
-            or soup.select("table tbody tr")
-            or soup.select(".item-list li")
-        )
-
-        # Eğer yapısal seçici bulamazsak, tüm linkleri tara
-        if not call_containers:
-            call_containers = _euresearch_fallback_parse(soup)
-
-        for item in call_containers[:max_results]:
-            call = _parse_euresearch_item(item)
-            if call and call.get("title") and call["title"] != "N/A":
-                calls.append(call)
-
-        # Son çare: sayfadaki tüm h3/h4'leri tara
-        if not calls:
-            calls = _euresearch_heading_parse(soup, max_results)
-
-    except Exception as e:
-        calls.append({
-            "call_id": "EUR_SCRAPE_ERROR",
-            "title": f"Euresearch Scrape Hatası: {str(e)[:100]}",
-            "status": "Error",
-            "deadline": "N/A",
-            "action_types": ["N/A"],
-            "source": "Euresearch",
-            "link": EURESEARCH_URL,
-            "keywords": [],
-            "destination": "",
-            "scope": "",
-            "expected_outcomes": "",
-            "topics": [],
-            "budget_total": "",
-            "budget_per_project": "",
-            "description": str(e),
-            "start_date": "",
-        })
-
-    return calls
-
-
-def _parse_euresearch_item(item) -> Optional[Dict]:
-    """Bir Euresearch çağrı öğesini parse et."""
-    try:
-        # Başlık bul
-        title_el = (
-            item.select_one("h2 a, h3 a, h4 a, .title a, .field-title a")
-            or item.select_one("h2, h3, h4, .title, .field-title")
-            or item.select_one("a[href*='call'], a[href*='topic']")
-        )
-        if not title_el:
-            # Tüm metni al
-            text = item.get_text(separator=" ", strip=True)
-            if len(text) < 10:
-                return None
-            title = text[:200]
-            link = ""
-        else:
-            title = title_el.get_text(strip=True)
-            link = title_el.get("href", "") if title_el.name == "a" else ""
-            if not link:
-                a = title_el.find("a")
-                if a:
-                    link = a.get("href", "")
-
-        title = clean_html(title)
-        if not title or len(title) < 3:
-            return None
-
-        # Link düzelt
-        if link and not link.startswith("http"):
-            link = f"https://www.euresearch.ch{link}"
-
-        # Status bul
-        status = "Open"
-        status_el = item.select_one(
-            ".status, .badge, .label, .tag, "
-            "[class*='status'], [class*='badge']"
-        )
-        if status_el:
-            st_text = status_el.get_text(strip=True).lower()
-            if "forthcoming" in st_text or "upcoming" in st_text:
-                status = "Forthcoming"
-            elif "closed" in st_text:
-                status = "Closed"
-
-        # Sayfadaki tüm metinde status ara
-        full_text = item.get_text(separator=" ", strip=True).lower()
-        if "forthcoming" in full_text:
-            status = "Forthcoming"
-        elif "closed" in full_text:
-            status = "Closed"
-
-        # Tarih bul
-        deadline = "N/A"
-        date_pattern = re.compile(r'(\d{4}-\d{2}-\d{2})')
-        date_match = date_pattern.search(item.get_text())
-        if date_match:
-            deadline = date_match.group(1)
-        else:
-            # Diğer tarih formatları
-            date_pattern2 = re.compile(
-                r'(\d{1,2})\s+(January|February|March|April|May|June|'
-                r'July|August|September|October|November|December)\s+(\d{4})',
-                re.IGNORECASE,
-            )
-            dm2 = date_pattern2.search(item.get_text())
-            if dm2:
-                try:
-                    deadline = datetime.strptime(
-                        dm2.group(0), "%d %B %Y"
-                    ).strftime("%Y-%m-%d")
-                except Exception:
-                    deadline = dm2.group(0)
-
-        # Bütçe bul
-        budget = ""
-        budget_pattern = re.compile(r'€[\d.,]+[MmKkBb]?')
-        budget_match = budget_pattern.search(item.get_text())
-        if budget_match:
-            budget = budget_match.group(0)
-
-        # Aksiyon türü bul
-        action_types = []
-        at_patterns = {
-            "RIA": r'\bRIA\b',
-            "IA": r'\bIA\b',
-            "CSA": r'\bCSA\b',
-            "ERC-StG": r'ERC.{0,5}(Starting|StG)',
-            "ERC-CoG": r'ERC.{0,5}(Consolidator|CoG)',
-            "ERC-AdG": r'ERC.{0,5}(Advanced|AdG)',
-            "ERC-PoC": r'ERC.{0,5}(Proof|PoC)',
-            "MSCA-DN": r'MSCA.{0,5}(Doctoral|DN)',
-            "MSCA-PF": r'MSCA.{0,5}(Postdoctoral|PF)',
-            "EIC-Pathfinder": r'EIC.{0,5}Pathfinder',
-            "EIC-Accelerator": r'EIC.{0,5}Accelerator',
-        }
-        for at_name, pat in at_patterns.items():
-            if re.search(pat, full_text, re.IGNORECASE):
-                action_types.append(at_name)
-        if not action_types:
-            action_types = ["RIA"]
-
-        # Kategori/destination bul
-        dest = ""
-        dest_el = item.select_one(
-            ".category, .programme, .cluster, "
-            "[class*='category'], [class*='programme']"
-        )
-        if dest_el:
-            dest = clean_html(dest_el.get_text(strip=True))
-
-        # Açıklama
-        desc_el = item.select_one(
-            ".description, .summary, .teaser, .body, "
-            "p, [class*='desc'], [class*='summary']"
-        )
-        desc = ""
-        if desc_el:
-            desc = clean_html(desc_el.get_text(strip=True))
-
-        # Call ID çıkar
-        call_id = ""
-        id_pattern = re.compile(
-            r'(HORIZON-[A-Z0-9-]+(?:-\d{4})?|'
-            r'ERC-\d{4}-[A-Za-z]+|'
-            r'EIC-\d{4}-[A-Za-z]+|'
-            r'MSCA-\d{4}-[A-Za-z]+)',
-        )
-        id_match = id_pattern.search(title + " " + full_text)
-        if id_match:
-            call_id = id_match.group(1)
-        else:
-            call_id = f"EUR-{hashlib.md5(title.encode()).hexdigest()[:8]}"
-
-        return {
-            "call_id": call_id,
-            "title": title,
-            "status": status,
-            "deadline": deadline,
-            "start_date": "",
-            "budget_total": budget,
-            "budget_per_project": budget,
-            "action_types": action_types,
-            "description": desc[:500],
-            "keywords": [],
-            "destination": dest,
-            "scope": desc[:1000],
-            "expected_outcomes": "",
-            "link": link or EURESEARCH_URL,
-            "source": "Euresearch",
-            "topics": [],
-        }
-
-    except Exception:
-        return None
-
-
-def _euresearch_fallback_parse(soup) -> list:
-    """Yapısal seçici bulunamazsa link bazlı parse."""
-    items = []
-    seen = set()
-    for a in soup.find_all("a", href=True):
-        href = a.get("href", "")
-        text = a.get_text(strip=True)
-        if len(text) < 15:
-            continue
-        # Horizon/ERC/EIC/MSCA ile ilgili linkleri bul
-        combined = (text + " " + href).lower()
-        if any(kw in combined for kw in [
-            "horizon", "erc", "eic", "msca", "call", "topic",
-            "cluster", "pillar", "pathfinder", "accelerator",
-        ]):
-            if text not in seen:
-                seen.add(text)
-                # Wrapper div oluştur
-                wrapper = a.parent if a.parent else a
-                items.append(wrapper)
-    return items
-
-
-def _euresearch_heading_parse(soup, max_results: int) -> List[Dict]:
-    """h3/h4 etiketlerinden çağrı bilgisi çıkar."""
-    calls = []
-    for heading in soup.find_all(["h2", "h3", "h4"])[:max_results * 2]:
-        title = clean_html(heading.get_text(strip=True))
-        if len(title) < 10:
-            continue
-
-        # İlgili mi kontrol et
-        combined = title.lower()
-        if not any(kw in combined for kw in [
-            "horizon", "erc", "eic", "msca", "call", "grant",
-            "pathfinder", "accelerator", "doctoral", "consolidator",
-            "starting", "advanced", "cluster", "pillar",
-        ]):
-            continue
-
-        link = ""
-        a = heading.find("a")
-        if a:
-            link = a.get("href", "")
-            if link and not link.startswith("http"):
-                link = f"https://www.euresearch.ch{link}"
-
-        # Heading sonrasındaki paragrafı al
-        desc = ""
-        next_el = heading.find_next_sibling()
-        if next_el:
-            desc = clean_html(next_el.get_text(strip=True))
-
-        call_id = f"EUR-{hashlib.md5(title.encode()).hexdigest()[:8]}"
-
-        calls.append({
-            "call_id": call_id,
-            "title": title,
-            "status": "Open",
-            "deadline": "N/A",
-            "start_date": "",
-            "budget_total": "",
-            "budget_per_project": "",
-            "action_types": ["RIA"],
-            "description": desc[:500],
-            "keywords": [],
-            "destination": "",
-            "scope": desc[:1000],
-            "expected_outcomes": "",
-            "link": link or EURESEARCH_URL,
-            "source": "Euresearch",
-            "topics": [],
-        })
-
-    return calls[:max_results]
-
-
-# ═══════════════════════════════════════════════════════════
-# UFUK AVRUPA SCRAPER — YENİ
-# ═══════════════════════════════════════════════════════════
-UFUKAVRUPA_URL = "https://ufukavrupa.org.tr/tr"
-UFUKAVRUPA_NEWS_URL = "https://ufukavrupa.org.tr/tr/haberler"
-UFUKAVRUPA_CALLS_URL = "https://ufukavrupa.org.tr/tr/cagrilar"
-
-
-def fetch_ufukavrupa_calls(max_results: int = 30) -> List[Dict]:
-    """ufukavrupa.org.tr'den çağrı bilgisi çek."""
+    """Euresearch.ch'den açık çağrıları scrape et."""
     if not HAS_BS4:
         return []
 
@@ -591,69 +431,295 @@ def fetch_ufukavrupa_calls(max_results: int = 30) -> List[Dict]:
                 "Chrome/120.0.0.0 Safari/537.36"
             ),
             "Accept": "text/html,application/xhtml+xml",
-            "Accept-Language": "tr-TR,tr;q=0.9,en-US;q=0.8,en;q=0.7",
+            "Accept-Language": "en-US,en;q=0.5",
+        }
+        resp = requests.get(EURESEARCH_URL, headers=headers, timeout=20)
+        if resp.status_code != 200:
+            return []
+
+        soup = BeautifulSoup(resp.text, "html.parser")
+
+        # Tüm div'leri tara — Euresearch yapısı
+        # Her çağrı kartı genellikle bir div container içinde
+        all_text_blocks = soup.find_all(
+            ["div", "article", "li", "tr"],
+            recursive=True,
+        )
+
+        seen_titles = set()
+        for block in all_text_blocks:
+            text = block.get_text(separator=" ", strip=True)
+            if len(text) < 30:
+                continue
+
+            # HORIZON, ERC, EIC, MSCA pattern var mı?
+            if not re.search(
+                r'(HORIZON|ERC|EIC|MSCA|Pathfinder|Accelerator|'
+                r'Starting|Consolidator|Advanced|Doctoral|'
+                r'Postdoctoral|Twinning|Teaming|Cluster)',
+                text,
+                re.IGNORECASE,
+            ):
+                continue
+
+            # Başlık çıkar — ilk anlamlı h element veya kalın metin
+            title = ""
+            for h in block.find_all(["h2", "h3", "h4", "strong", "b"]):
+                t = clean_html(h.get_text(strip=True))
+                if len(t) >= 10:
+                    title = t
+                    break
+
+            if not title:
+                # İlk satırı başlık olarak al
+                lines = [
+                    l.strip() for l in text.split("\n")
+                    if len(l.strip()) >= 10
+                ]
+                if lines:
+                    title = clean_html(lines[0])[:200]
+
+            if not title or len(title) < 10:
+                continue
+
+            # Duplicate kontrolü
+            title_key = title.lower()[:50]
+            if title_key in seen_titles:
+                continue
+            seen_titles.add(title_key)
+
+            # Link bul
+            link = ""
+            for a in block.find_all("a", href=True):
+                href = a.get("href", "")
+                if any(x in href.lower() for x in [
+                    "topic", "call", "horizon", "erc", "eic", "msca",
+                    "ec.europa.eu",
+                ]):
+                    link = href
+                    break
+            if not link:
+                first_a = block.find("a", href=True)
+                if first_a:
+                    link = first_a.get("href", "")
+            if link and not link.startswith("http"):
+                link = f"https://www.euresearch.ch{link}"
+
+            # Status
+            status = "Open"
+            text_lower = text.lower()
+            if "forthcoming" in text_lower or "upcoming" in text_lower:
+                status = "Forthcoming"
+            elif "closed" in text_lower:
+                status = "Closed"
+
+            # Tarih bul
+            deadline = "N/A"
+            date_patterns = [
+                (r'(\d{4}-\d{2}-\d{2})', None),
+                (
+                    r'(\d{1,2})\s+(January|February|March|April|May|June|'
+                    r'July|August|September|October|November|December)\s+(\d{4})',
+                    "%d %B %Y",
+                ),
+                (r'(\d{2})\.(\d{2})\.(\d{4})', "dmy_dot"),
+            ]
+            for pat, fmt in date_patterns:
+                dm = re.search(pat, text, re.IGNORECASE)
+                if dm:
+                    if fmt is None:
+                        deadline = dm.group(1)
+                    elif fmt == "dmy_dot":
+                        d, m, y = dm.groups()
+                        deadline = f"{y}-{m}-{d}"
+                    else:
+                        try:
+                            deadline = datetime.strptime(
+                                dm.group(0), fmt,
+                            ).strftime("%Y-%m-%d")
+                        except Exception:
+                            pass
+                    break
+
+            # Bütçe bul
+            budget = ""
+            budget_match = re.search(r'€\s*[\d.,]+\s*[MmKkBb]?', text)
+            if budget_match:
+                budget = budget_match.group(0).strip()
+
+            # Action type tespit
+            action_types = _detect_action_types_from_text(title, text)
+
+            # Call ID
+            call_id = ""
+            id_match = re.search(
+                r'(HORIZON-[A-Z0-9]+-\d{4}-[A-Z0-9-]+|'
+                r'ERC-\d{4}-[A-Za-z]+|'
+                r'EIC-\d{4}-[A-Za-z]+|'
+                r'MSCA-\d{4}-[A-Za-z-]+)',
+                text,
+            )
+            if id_match:
+                call_id = id_match.group(1)
+            else:
+                call_id = f"EUR-{hashlib.md5(title.encode()).hexdigest()[:8]}"
+
+            # Açıklama — title dışındaki metin
+            desc = clean_html(text)
+            if desc.startswith(title):
+                desc = desc[len(title):].strip()
+            desc = desc[:500]
+
+            # Destination
+            dest = ""
+            dest_patterns = [
+                r'(European Research Council)',
+                r'(EIC\s+\w+)',
+                r'(MSCA\s+\w+)',
+                r'(Cluster\s+\d)',
+                r'(Pillar\s+\w+)',
+                r'(Widening)',
+            ]
+            for dp in dest_patterns:
+                dm = re.search(dp, text, re.IGNORECASE)
+                if dm:
+                    dest = dm.group(1)
+                    break
+
+            calls.append({
+                "call_id": call_id,
+                "title": title,
+                "status": status,
+                "deadline": deadline,
+                "start_date": "",
+                "budget_total": budget,
+                "budget_per_project": budget,
+                "action_types": action_types,
+                "description": desc,
+                "keywords": [],
+                "destination": dest,
+                "scope": desc,
+                "expected_outcomes": "",
+                "link": link or EURESEARCH_URL,
+                "source": "Euresearch",
+                "topics": [],
+            })
+
+            if len(calls) >= max_results:
+                break
+
+    except Exception:
+        pass
+
+    return calls
+
+
+# ═══════════════════════════════════════════════════════════
+# UFUK AVRUPA SCRAPER
+# ═══════════════════════════════════════════════════════════
+UFUKAVRUPA_BASE = "https://ufukavrupa.org.tr"
+
+
+def fetch_ufukavrupa_calls(max_results: int = 30) -> List[Dict]:
+    """ufukavrupa.org.tr'den çağrı bilgisi çek."""
+    if not HAS_BS4:
+        return []
+
+    calls = []
+    try:
+        headers = {
+            "User-Agent": (
+                "Mozilla/5.0 (Windows NT 10.0; Win64; x64) "
+                "AppleWebKit/537.36 Chrome/120.0 Safari/537.36"
+            ),
+            "Accept": "text/html,application/xhtml+xml",
+            "Accept-Language": "tr-TR,tr;q=0.9",
         }
 
-        # Çağrılar sayfası
-        for url in [UFUKAVRUPA_CALLS_URL, UFUKAVRUPA_URL]:
+        urls = [
+            f"{UFUKAVRUPA_BASE}/tr/cagrilar",
+            f"{UFUKAVRUPA_BASE}/tr",
+            f"{UFUKAVRUPA_BASE}/tr/haberler",
+        ]
+
+        for url in urls:
             try:
                 resp = requests.get(url, headers=headers, timeout=20)
                 if resp.status_code != 200:
                     continue
 
                 soup = BeautifulSoup(resp.text, "html.parser")
+                seen = set()
 
-                # Çeşitli container seçiciler
-                containers = (
-                    soup.select(".view-content .views-row")
-                    or soup.select("article")
-                    or soup.select(".node")
-                    or soup.select(".card")
-                    or soup.select("table tbody tr")
-                    or soup.select(".item-list li")
-                )
+                # Tüm anlamlı blokları tara
+                for el in soup.find_all(["article", "div", "li"]):
+                    text = el.get_text(separator=" ", strip=True)
+                    if len(text) < 30:
+                        continue
 
-                for item in containers[:max_results]:
-                    call = _parse_ufukavrupa_item(item)
-                    if call and call.get("title") and len(call["title"]) > 10:
-                        calls.append(call)
-
-                # Heading bazlı fallback
-                if not calls:
-                    for heading in soup.find_all(["h2", "h3", "h4"])[:max_results]:
-                        title = clean_html(heading.get_text(strip=True))
-                        if len(title) < 15:
-                            continue
-                        lower = title.lower()
-                        if any(kw in lower for kw in [
+                    # Horizon/çağrı ile ilgili mi?
+                    if not any(
+                        kw in text.lower()
+                        for kw in [
                             "çağrı", "horizon", "erc", "eic", "msca",
-                            "hibe", "başvuru", "program",
-                        ]):
-                            link = ""
-                            a = heading.find("a")
-                            if a:
-                                link = a.get("href", "")
-                                if link and not link.startswith("http"):
-                                    link = f"https://ufukavrupa.org.tr{link}"
+                            "hibe", "başvuru", "program", "proje",
+                            "cluster", "call",
+                        ]
+                    ):
+                        continue
 
-                            calls.append({
-                                "call_id": f"UA-{hashlib.md5(title.encode()).hexdigest()[:8]}",
-                                "title": title,
-                                "status": "Open",
-                                "deadline": "N/A",
-                                "start_date": "",
-                                "budget_total": "",
-                                "budget_per_project": "",
-                                "action_types": ["RIA"],
-                                "description": "",
-                                "keywords": [],
-                                "destination": "",
-                                "scope": "",
-                                "expected_outcomes": "",
-                                "link": link or UFUKAVRUPA_CALLS_URL,
-                                "source": "UfukAvrupa",
-                                "topics": [],
-                            })
+                    title_el = el.find(["h2", "h3", "h4", "a"])
+                    if not title_el:
+                        continue
+
+                    title = clean_html(title_el.get_text(strip=True))
+                    if not title or len(title) < 10:
+                        continue
+
+                    tk = title.lower()[:50]
+                    if tk in seen:
+                        continue
+                    seen.add(tk)
+
+                    link = ""
+                    a = title_el if title_el.name == "a" else title_el.find("a")
+                    if a:
+                        link = a.get("href", "")
+                    if link and not link.startswith("http"):
+                        link = f"{UFUKAVRUPA_BASE}{link}"
+
+                    # Tarih
+                    deadline = "N/A"
+                    dm = re.search(r'(\d{4}-\d{2}-\d{2})', text)
+                    if dm:
+                        deadline = dm.group(1)
+                    else:
+                        dm2 = re.search(r'(\d{1,2})[./](\d{1,2})[./](\d{4})', text)
+                        if dm2:
+                            d, m, y = dm2.groups()
+                            deadline = f"{y}-{m.zfill(2)}-{d.zfill(2)}"
+
+                    calls.append({
+                        "call_id": f"UA-{hashlib.md5(title.encode()).hexdigest()[:8]}",
+                        "title": title,
+                        "status": "Open",
+                        "deadline": deadline,
+                        "start_date": "",
+                        "budget_total": "",
+                        "budget_per_project": "",
+                        "action_types": _detect_action_types_from_text("", title),
+                        "description": clean_html(text)[:500],
+                        "keywords": [],
+                        "destination": "",
+                        "scope": clean_html(text)[:1000],
+                        "expected_outcomes": "",
+                        "link": link or url,
+                        "source": "UfukAvrupa",
+                        "topics": [],
+                    })
+
+                    if len(calls) >= max_results:
+                        break
 
                 if calls:
                     break
@@ -661,95 +727,10 @@ def fetch_ufukavrupa_calls(max_results: int = 30) -> List[Dict]:
             except Exception:
                 continue
 
-    except Exception as e:
-        calls.append({
-            "call_id": "UA_ERROR",
-            "title": f"UfukAvrupa Hatası: {str(e)[:100]}",
-            "status": "Error",
-            "deadline": "N/A",
-            "action_types": ["N/A"],
-            "source": "UfukAvrupa",
-            "link": UFUKAVRUPA_URL,
-            "keywords": [],
-            "destination": "",
-            "scope": "",
-            "expected_outcomes": "",
-            "topics": [],
-            "budget_total": "",
-            "budget_per_project": "",
-            "description": str(e),
-            "start_date": "",
-        })
+    except Exception:
+        pass
 
     return calls
-
-
-def _parse_ufukavrupa_item(item) -> Optional[Dict]:
-    """UfukAvrupa çağrı öğesini parse et."""
-    try:
-        title_el = (
-            item.select_one("h2 a, h3 a, h4 a, .title a, a")
-            or item.select_one("h2, h3, h4, .title")
-        )
-        if not title_el:
-            return None
-
-        title = clean_html(title_el.get_text(strip=True))
-        if not title or len(title) < 10:
-            return None
-
-        link = ""
-        if title_el.name == "a":
-            link = title_el.get("href", "")
-        else:
-            a = title_el.find("a")
-            if a:
-                link = a.get("href", "")
-        if link and not link.startswith("http"):
-            link = f"https://ufukavrupa.org.tr{link}"
-
-        # Tarih
-        deadline = "N/A"
-        text = item.get_text(separator=" ", strip=True)
-        date_match = re.search(r'(\d{4}-\d{2}-\d{2})', text)
-        if date_match:
-            deadline = date_match.group(1)
-        else:
-            date_match2 = re.search(
-                r'(\d{1,2})[./](\d{1,2})[./](\d{4})', text
-            )
-            if date_match2:
-                try:
-                    d, m, y = date_match2.groups()
-                    deadline = f"{y}-{m.zfill(2)}-{d.zfill(2)}"
-                except Exception:
-                    pass
-
-        desc_el = item.select_one("p, .body, .summary, .description")
-        desc = clean_html(desc_el.get_text(strip=True)) if desc_el else ""
-
-        call_id = f"UA-{hashlib.md5(title.encode()).hexdigest()[:8]}"
-
-        return {
-            "call_id": call_id,
-            "title": title,
-            "status": "Open",
-            "deadline": deadline,
-            "start_date": "",
-            "budget_total": "",
-            "budget_per_project": "",
-            "action_types": ["RIA"],
-            "description": desc[:500],
-            "keywords": [],
-            "destination": "",
-            "scope": desc[:1000],
-            "expected_outcomes": "",
-            "link": link or UFUKAVRUPA_CALLS_URL,
-            "source": "UfukAvrupa",
-            "topics": [],
-        }
-    except Exception:
-        return None
 
 
 # ═══════════════════════════════════════════════════════════
@@ -778,7 +759,7 @@ def detect_action_type_from_call(call_data: dict) -> str:
         if any(kw in combined for kw in keywords):
             return action_type
 
-    if types:
+    if types and types[0] != "RIA":
         return types[0]
     return "RIA"
 
@@ -786,17 +767,21 @@ def detect_action_type_from_call(call_data: dict) -> str:
 def build_call_specific_criteria(call_data: dict, topic_details: dict = None) -> dict:
     at = detect_action_type_from_call(call_data)
     ctx_parts = [
-        f"Call: {call_data.get('call_id', 'N/A')}",
-        f"Title: {call_data.get('title', 'N/A')}",
+        f"Call: {clean_html(call_data.get('call_id', 'N/A'))}",
+        f"Title: {clean_html(call_data.get('title', 'N/A'))}",
         f"Action Type: {at}",
         f"Deadline: {call_data.get('deadline', 'N/A')}",
     ]
-    if call_data.get("scope"):
-        ctx_parts.append(f"Scope: {call_data['scope'][:800]}")
-    if call_data.get("expected_outcomes"):
-        ctx_parts.append(f"Expected Outcomes: {call_data['expected_outcomes'][:500]}")
+    scope = clean_html(call_data.get("scope", ""))
+    if scope:
+        ctx_parts.append(f"Scope: {scope[:800]}")
+    outcomes = clean_html(call_data.get("expected_outcomes", ""))
+    if outcomes:
+        ctx_parts.append(f"Expected Outcomes: {outcomes[:500]}")
     if topic_details and topic_details.get("description"):
-        ctx_parts.append(f"Topic Description: {topic_details['description'][:1000]}")
+        ctx_parts.append(
+            f"Topic Description: {clean_html(topic_details['description'][:1000])}"
+        )
 
     return {
         "action_type": at,
@@ -819,23 +804,27 @@ def fetch_all_calls(
 ) -> Tuple[List[Dict], Dict]:
     """Tüm kaynaklardan çağrı çek ve birleştir."""
     all_calls = []
-    src_stats = {"ec_api": 0, "euresearch": 0, "ufukavrupa": 0, "local_db": 0, "total": 0}
+    src_stats = {
+        "ec_api": 0, "euresearch": 0, "ufukavrupa": 0,
+        "local_db": 0, "total": 0, "ec_debug": {},
+    }
 
     # 1. EC API
     if use_ec_api:
         try:
-            ec_calls = fetch_horizon_calls(search_text, status_filter, max_api_results)
-            ec_calls = [c for c in ec_calls if c.get("status") != "Error"]
+            ec_calls, ec_debug = fetch_horizon_calls(
+                search_text, status_filter, max_api_results,
+            )
             src_stats["ec_api"] = len(ec_calls)
+            src_stats["ec_debug"] = ec_debug
             all_calls.extend(ec_calls)
-        except Exception:
-            pass
+        except Exception as e:
+            src_stats["ec_debug"] = {"error": str(e)[:200]}
 
     # 2. Euresearch
     if use_euresearch:
         try:
             eur_calls = fetch_euresearch_calls(50)
-            eur_calls = [c for c in eur_calls if c.get("status") != "Error"]
             src_stats["euresearch"] = len(eur_calls)
             all_calls.extend(eur_calls)
         except Exception:
@@ -845,23 +834,23 @@ def fetch_all_calls(
     if use_ufukavrupa:
         try:
             ua_calls = fetch_ufukavrupa_calls(30)
-            ua_calls = [c for c in ua_calls if c.get("status") != "Error"]
             src_stats["ufukavrupa"] = len(ua_calls)
             all_calls.extend(ua_calls)
         except Exception:
             pass
 
-    # 4. Yerel DB (call_db'den)
+    # 4. Yerel DB
     try:
         from call_db import HORIZON_CALLS_DB
-        src_stats["local_db"] = len(HORIZON_CALLS_DB)
-        # Duplicate kontrolü
         existing_ids = set(c.get("call_id", "") for c in all_calls)
+        db_added = 0
         for db_call in HORIZON_CALLS_DB:
             if db_call.get("call_id") not in existing_ids:
                 db_call_copy = dict(db_call)
                 db_call_copy["source"] = db_call_copy.get("source", "Local DB")
                 all_calls.append(db_call_copy)
+                db_added += 1
+        src_stats["local_db"] = db_added
     except Exception:
         pass
 
@@ -874,6 +863,10 @@ def fetch_all_calls(
             key = c.get("title", "")[:60]
         if key and key not in seen:
             seen.add(key)
+            # Tüm string alanları temizle
+            c["title"] = clean_html(c.get("title", ""))
+            c["description"] = clean_html(c.get("description", ""))
+            c["destination"] = clean_html(c.get("destination", ""))
             unique.append(c)
 
     src_stats["total"] = len(unique)
@@ -886,7 +879,6 @@ def fetch_all_calls(
 def calls_to_excel_bytes(calls: List[Dict]) -> bytes:
     """Çağrıları Excel dosyasına dönüştür."""
     if not HAS_OPENPYXL:
-        # CSV fallback
         import csv
         from io import StringIO
         output = StringIO()
@@ -934,12 +926,8 @@ def calls_to_excel_bytes(calls: List[Dict]) -> bytes:
         ws.cell(row=row, column=7, value=clean_html(c.get("destination", ""))[:100])
         ws.cell(row=row, column=8, value=c.get("source", ""))
         ws.cell(row=row, column=9, value=c.get("link", ""))
-        ws.cell(
-            row=row, column=10,
-            value=clean_html(c.get("description", ""))[:300],
-        )
+        ws.cell(row=row, column=10, value=clean_html(c.get("description", ""))[:300])
 
-    # Sütun genişlikleri
     widths = [25, 60, 12, 12, 20, 15, 30, 15, 50, 50]
     for i, w in enumerate(widths, 1):
         ws.column_dimensions[openpyxl.utils.get_column_letter(i)].width = w
