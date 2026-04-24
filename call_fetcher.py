@@ -338,7 +338,7 @@ for page_num in range(1, max_pages + 1):
             attempt["page1_count"] = len(results)
 
             calls = []
-            for item in results:
+            for item in all_results:
                 parsed = _parse_ec_result(item)
                 if parsed and _keep_only_current_horizon(parsed):
                     calls.append(parsed)
