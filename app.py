@@ -1741,7 +1741,7 @@ ed = [
         "status": ch.status.value,
         "message": ch.message,
     }
-    for ch in elig.results
+    elig = run_eligibility_checks(proposal, action)
 ]
 
 # 👇 raporları önce üret (çok önemli)
