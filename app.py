@@ -737,17 +737,20 @@ def render_call_dashboard():
     cached = st.session_state.call_cache.get(cache_key)
 
     if cached:
-        calls, src_stats = cached
-    else:
-        with st.spinner("📡 Çağrılar çekiliyor (EC API + Euresearch + UfukAvrupa + DB)..."):
-            calls, src_stats = fetch_horizon_calls(
-                search_text=search,
-                status_filter=status_filter,
-                use_ec_api=use_ec_api,
-                use_euresearch=use_euresearch,
-                use_ufukavrupa=use_ufukavrupa,
-                max_api_results=max_results,
-            )
+    calls, src_stats = cached
+else:
+    with st.spinner("📡 Çağrılar çekiliyor..."):
+        calls, total = fetch_horizon_calls(
+            search_text=search,
+            status=status_filter,
+            programme="HORIZON",
+            page_size=max_results,
+        )
+
+        src_stats = {
+            "success": True,
+            "total_calls": total,
+        }
         if status_filter:
             calls = [
                 c for c in calls
