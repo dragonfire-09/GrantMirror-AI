@@ -736,7 +736,7 @@ def render_call_dashboard():
     )
     cached = st.session_state.call_cache.get(cache_key)
 
-   if cached:
+if cached:
     calls, src_stats = cached
 else:
     with st.spinner("📡 Çağrılar çekiliyor..."):
