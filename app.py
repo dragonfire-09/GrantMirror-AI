@@ -670,12 +670,16 @@ def render_call_dashboard():
         search = st.text_input("🔍 Arama", placeholder="Anahtar kelime...")
 
     with col2:
-        status_filter = st.selectbox(
-            "📋 Durum",
-            ["", "Open", "Forthcoming"],
-            index=0,
-            format_func=lambda x: x if x else "Open + Forthcoming",
-        )
+    status_filter = st.selectbox(
+        "📋 Durum",
+        ["", "Open", "Forthcoming"],
+        index=0,
+        format_func=lambda x: {
+            "": "Open + Forthcoming",
+            "Open": "Açık",
+            "Forthcoming": "Yaklaşan",
+        }.get(x, x),
+    )
 
     with col3:
         dest_options = [""] + sorted(
