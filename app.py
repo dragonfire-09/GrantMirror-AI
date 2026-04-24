@@ -9,6 +9,7 @@ import time
 import os
 from typing import Dict, List, Optional
 from collections import Counter
+from datetime import datetime
 from openai import OpenAI
 
 from config import (
@@ -28,7 +29,10 @@ from call_fetcher import (
     CallCache,
     calls_to_excel_bytes,
 )
-from call_db import keyword_match_calls, ai_match_calls, build_call_eval_context, HORIZON_CALLS_DB
+from call_db import (
+    keyword_match_calls, ai_match_calls, build_call_eval_context,
+    HORIZON_CALLS_DB, get_call_stats,
+)
 from rag_engine import get_criterion_context as rag_get_context, ai_enhanced_retrieval
 
 # ═══════════════════════════════════════════════════════════
@@ -46,10 +50,8 @@ st.set_page_config(
 # ═══════════════════════════════════════════════════════════
 st.markdown("""
 <style>
-/* ── Google Font ── */
 @import url('https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700;800;900&display=swap');
 
-/* ── Root Variables ── */
 :root {
     --gm-primary: #6366f1;
     --gm-primary-light: #818cf8;
@@ -74,542 +76,172 @@ st.markdown("""
     --gm-transition: all 0.2s cubic-bezier(0.4, 0, 0.2, 1);
 }
 
-/* ── Global ── */
 html, body, [class*="css"] {
     font-family: 'Inter', -apple-system, BlinkMacSystemFont, sans-serif !important;
     color: var(--gm-text);
 }
+.stApp { background: var(--gm-bg); }
 
-.stApp {
-    background: var(--gm-bg);
-}
-
-/* ── Sidebar ── */
 section[data-testid="stSidebar"] {
     background: linear-gradient(180deg, #1e1b4b 0%, #312e81 50%, #3730a3 100%) !important;
     border-right: none !important;
 }
-
-section[data-testid="stSidebar"] * {
-    color: #e0e7ff !important;
-}
-
+section[data-testid="stSidebar"] * { color: #e0e7ff !important; }
 section[data-testid="stSidebar"] .stSelectbox label,
 section[data-testid="stSidebar"] .stRadio label,
 section[data-testid="stSidebar"] .stCheckbox label,
 section[data-testid="stSidebar"] .stTextArea label {
-    color: #c7d2fe !important;
-    font-weight: 500 !important;
-    font-size: 0.85rem !important;
+    color: #c7d2fe !important; font-weight: 500 !important; font-size: 0.85rem !important;
 }
-
 section[data-testid="stSidebar"] .stMarkdown h2 {
-    color: #ffffff !important;
-    font-size: 1.1rem !important;
-    font-weight: 700 !important;
-    letter-spacing: -0.02em;
+    color: #ffffff !important; font-size: 1.1rem !important; font-weight: 700 !important;
 }
-
 section[data-testid="stSidebar"] .stMarkdown h3 {
-    color: #a5b4fc !important;
-    font-size: 0.95rem !important;
-    font-weight: 600 !important;
+    color: #a5b4fc !important; font-size: 0.95rem !important; font-weight: 600 !important;
 }
-
-section[data-testid="stSidebar"] hr {
-    border-color: rgba(165,180,252,0.2) !important;
-}
-
+section[data-testid="stSidebar"] hr { border-color: rgba(165,180,252,0.2) !important; }
 section[data-testid="stSidebar"] .stExpander {
     background: rgba(255,255,255,0.06) !important;
     border: 1px solid rgba(255,255,255,0.1) !important;
     border-radius: var(--gm-radius-sm) !important;
 }
 
-/* ── Cards ── */
 .gm-card {
-    background: var(--gm-surface);
-    border: 1px solid var(--gm-border);
-    border-radius: var(--gm-radius);
-    padding: 1.5rem;
-    margin-bottom: 1rem;
-    box-shadow: var(--gm-shadow);
-    transition: var(--gm-transition);
+    background: var(--gm-surface); border: 1px solid var(--gm-border);
+    border-radius: var(--gm-radius); padding: 1.5rem; margin-bottom: 1rem;
+    box-shadow: var(--gm-shadow); transition: var(--gm-transition);
 }
-
 .gm-card:hover {
-    box-shadow: var(--gm-shadow-lg);
-    border-color: var(--gm-primary-light);
+    box-shadow: var(--gm-shadow-lg); border-color: var(--gm-primary-light);
     transform: translateY(-1px);
 }
 
-/* ── Call Cards ── */
 .gm-call-card {
-    background: var(--gm-surface);
-    border: 1px solid var(--gm-border);
-    border-radius: var(--gm-radius);
-    padding: 1.25rem 1.5rem;
-    margin-bottom: 0.75rem;
-    box-shadow: var(--gm-shadow);
-    transition: var(--gm-transition);
-    position: relative;
-    overflow: hidden;
+    background: var(--gm-surface); border: 1px solid var(--gm-border);
+    border-radius: var(--gm-radius); padding: 1.25rem 1.5rem;
+    margin-bottom: 0.75rem; box-shadow: var(--gm-shadow);
+    transition: var(--gm-transition); position: relative; overflow: hidden;
 }
-
 .gm-call-card::before {
-    content: '';
-    position: absolute;
-    left: 0;
-    top: 0;
-    bottom: 0;
-    width: 4px;
-    background: var(--gm-primary);
-    border-radius: 0 2px 2px 0;
+    content: ''; position: absolute; left: 0; top: 0; bottom: 0;
+    width: 4px; background: var(--gm-primary); border-radius: 0 2px 2px 0;
 }
-
 .gm-call-card:hover {
-    box-shadow: var(--gm-shadow-lg);
-    border-color: var(--gm-primary-light);
+    box-shadow: var(--gm-shadow-lg); border-color: var(--gm-primary-light);
     transform: translateY(-2px);
 }
+.gm-call-card h4 { color: var(--gm-text); font-weight: 600; font-size: 1rem; line-height: 1.4; margin: 0; }
+.gm-call-card p { font-size: 0.85rem; }
 
-.gm-call-card h4 {
-    color: var(--gm-text);
-    font-weight: 600;
-    font-size: 1rem;
-    line-height: 1.4;
-    margin: 0;
-}
-
-.gm-call-card p {
-    font-size: 0.85rem;
-}
-
-/* ── Status Badges ── */
 .gm-badge-open {
-    background: linear-gradient(135deg, #dcfce7, #bbf7d0);
-    color: #166534;
-    padding: 0.25rem 0.75rem;
-    border-radius: 20px;
-    font-size: 0.75rem;
-    font-weight: 600;
-    letter-spacing: 0.02em;
-    display: inline-block;
-    border: 1px solid #86efac;
+    background: linear-gradient(135deg, #dcfce7, #bbf7d0); color: #166534;
+    padding: 0.25rem 0.75rem; border-radius: 20px; font-size: 0.75rem;
+    font-weight: 600; display: inline-block; border: 1px solid #86efac;
 }
-
 .gm-badge-forthcoming {
-    background: linear-gradient(135deg, #fef9c3, #fde68a);
-    color: #854d0e;
-    padding: 0.25rem 0.75rem;
-    border-radius: 20px;
-    font-size: 0.75rem;
-    font-weight: 600;
-    letter-spacing: 0.02em;
-    display: inline-block;
-    border: 1px solid #fcd34d;
+    background: linear-gradient(135deg, #fef9c3, #fde68a); color: #854d0e;
+    padding: 0.25rem 0.75rem; border-radius: 20px; font-size: 0.75rem;
+    font-weight: 600; display: inline-block; border: 1px solid #fcd34d;
 }
-
 .gm-badge-closed {
-    background: linear-gradient(135deg, #fee2e2, #fecaca);
-    color: #991b1b;
-    padding: 0.25rem 0.75rem;
-    border-radius: 20px;
-    font-size: 0.75rem;
-    font-weight: 600;
-    letter-spacing: 0.02em;
-    display: inline-block;
-    border: 1px solid #fca5a5;
+    background: linear-gradient(135deg, #fee2e2, #fecaca); color: #991b1b;
+    padding: 0.25rem 0.75rem; border-radius: 20px; font-size: 0.75rem;
+    font-weight: 600; display: inline-block; border: 1px solid #fca5a5;
 }
 
-/* ── Match Score Badge ── */
 .gm-match-high {
-    background: linear-gradient(135deg, #10b981, #059669);
-    color: white;
-    padding: 0.3rem 0.9rem;
-    border-radius: 20px;
-    font-size: 0.8rem;
-    font-weight: 700;
-    display: inline-block;
+    background: linear-gradient(135deg, #10b981, #059669); color: white;
+    padding: 0.3rem 0.9rem; border-radius: 20px; font-size: 0.8rem;
+    font-weight: 700; display: inline-block;
 }
-
 .gm-match-medium {
-    background: linear-gradient(135deg, #f59e0b, #d97706);
-    color: white;
-    padding: 0.3rem 0.9rem;
-    border-radius: 20px;
-    font-size: 0.8rem;
-    font-weight: 700;
-    display: inline-block;
+    background: linear-gradient(135deg, #f59e0b, #d97706); color: white;
+    padding: 0.3rem 0.9rem; border-radius: 20px; font-size: 0.8rem;
+    font-weight: 700; display: inline-block;
 }
-
 .gm-match-low {
-    background: linear-gradient(135deg, #ef4444, #dc2626);
-    color: white;
-    padding: 0.3rem 0.9rem;
-    border-radius: 20px;
-    font-size: 0.8rem;
-    font-weight: 700;
-    display: inline-block;
+    background: linear-gradient(135deg, #ef4444, #dc2626); color: white;
+    padding: 0.3rem 0.9rem; border-radius: 20px; font-size: 0.8rem;
+    font-weight: 700; display: inline-block;
 }
 
-/* ── Hero Header ── */
 .gm-hero {
     background: linear-gradient(135deg, #1e1b4b 0%, #312e81 40%, #4f46e5 100%);
-    border-radius: 20px;
-    padding: 2.5rem 2rem;
-    text-align: center;
-    margin-bottom: 2rem;
-    box-shadow: var(--gm-shadow-xl);
-    position: relative;
-    overflow: hidden;
+    border-radius: 20px; padding: 2.5rem 2rem; text-align: center;
+    margin-bottom: 2rem; box-shadow: var(--gm-shadow-xl);
+    position: relative; overflow: hidden;
 }
-
 .gm-hero::before {
-    content: '';
-    position: absolute;
-    top: -50%;
-    left: -50%;
-    width: 200%;
-    height: 200%;
+    content: ''; position: absolute; top: -50%; left: -50%; width: 200%; height: 200%;
     background: radial-gradient(circle, rgba(99,102,241,0.15) 0%, transparent 60%);
     animation: gm-pulse 8s ease-in-out infinite;
 }
-
 @keyframes gm-pulse {
     0%, 100% { transform: scale(1); opacity: 0.5; }
     50% { transform: scale(1.1); opacity: 0.8; }
 }
-
-.gm-hero h1 {
-    color: #ffffff !important;
-    font-size: 2.2rem !important;
-    font-weight: 800 !important;
-    margin: 0 0 0.3rem 0 !important;
-    letter-spacing: -0.03em;
-    position: relative;
-}
-
-.gm-hero .gm-subtitle {
-    color: #c7d2fe;
-    font-size: 1rem;
-    font-weight: 400;
-    margin: 0;
-    position: relative;
-}
-
-.gm-hero .gm-tags {
-    color: #a5b4fc;
-    font-size: 0.8rem;
-    margin-top: 0.8rem;
-    position: relative;
-}
-
+.gm-hero h1 { color: #ffffff !important; font-size: 2.2rem !important; font-weight: 800 !important; margin: 0 0 0.3rem 0 !important; position: relative; }
+.gm-hero .gm-subtitle { color: #c7d2fe; font-size: 1rem; font-weight: 400; margin: 0; position: relative; }
+.gm-hero .gm-tags { color: #a5b4fc; font-size: 0.8rem; margin-top: 0.8rem; position: relative; }
 .gm-hero .gm-tags span {
-    background: rgba(255,255,255,0.1);
-    padding: 0.2rem 0.6rem;
-    border-radius: 12px;
-    margin: 0 0.15rem;
-    display: inline-block;
-    margin-bottom: 0.3rem;
+    background: rgba(255,255,255,0.1); padding: 0.2rem 0.6rem; border-radius: 12px;
+    margin: 0 0.15rem; display: inline-block; margin-bottom: 0.3rem;
     border: 1px solid rgba(255,255,255,0.1);
 }
 
-/* ── Metric Cards ── */
 .gm-metric {
-    background: var(--gm-surface);
-    border: 1px solid var(--gm-border);
-    border-radius: var(--gm-radius);
-    padding: 1.2rem 1.5rem;
-    text-align: center;
-    box-shadow: var(--gm-shadow);
-    transition: var(--gm-transition);
+    background: var(--gm-surface); border: 1px solid var(--gm-border);
+    border-radius: var(--gm-radius); padding: 1.2rem 1.5rem; text-align: center;
+    box-shadow: var(--gm-shadow); transition: var(--gm-transition);
 }
+.gm-metric:hover { transform: translateY(-2px); box-shadow: var(--gm-shadow-lg); }
+.gm-metric .gm-metric-value { font-size: 1.8rem; font-weight: 800; color: var(--gm-primary); line-height: 1; margin-bottom: 0.3rem; }
+.gm-metric .gm-metric-label { font-size: 0.8rem; font-weight: 500; color: var(--gm-text-secondary); text-transform: uppercase; letter-spacing: 0.05em; }
+.gm-metric .gm-metric-delta { font-size: 0.75rem; margin-top: 0.2rem; }
 
-.gm-metric:hover {
-    transform: translateY(-2px);
-    box-shadow: var(--gm-shadow-lg);
-}
+.gm-score-container { margin-bottom: 1.2rem; }
+.gm-score-header { display: flex; justify-content: space-between; align-items: baseline; margin-bottom: 0.4rem; }
+.gm-score-label { font-weight: 600; font-size: 0.95rem; color: var(--gm-text); }
+.gm-score-value { font-weight: 800; font-size: 1.1rem; }
+.gm-score-track { background: #e2e8f0; border-radius: 12px; height: 14px; position: relative; overflow: hidden; }
+.gm-score-fill { height: 100%; border-radius: 12px; transition: width 1s cubic-bezier(0.4, 0, 0.2, 1); }
+.gm-score-fill-green { background: linear-gradient(90deg, #10b981, #34d399); }
+.gm-score-fill-yellow { background: linear-gradient(90deg, #f59e0b, #fbbf24); }
+.gm-score-fill-red { background: linear-gradient(90deg, #ef4444, #f87171); }
+.gm-score-threshold { position: absolute; top: -2px; height: calc(100% + 4px); width: 3px; background: #1e293b; border-radius: 2px; z-index: 2; }
+.gm-score-meta { display: flex; justify-content: space-between; margin-top: 0.3rem; font-size: 0.75rem; color: var(--gm-text-muted); }
 
-.gm-metric .gm-metric-value {
-    font-size: 1.8rem;
-    font-weight: 800;
-    color: var(--gm-primary);
-    line-height: 1;
-    margin-bottom: 0.3rem;
-}
+.gm-section-header { display: flex; align-items: center; gap: 0.6rem; margin: 2rem 0 1rem 0; padding-bottom: 0.5rem; border-bottom: 2px solid var(--gm-border); }
+.gm-section-header .gm-section-icon { font-size: 1.4rem; }
+.gm-section-header h2 { font-size: 1.3rem !important; font-weight: 700 !important; color: var(--gm-text) !important; margin: 0 !important; }
 
-.gm-metric .gm-metric-label {
-    font-size: 0.8rem;
-    font-weight: 500;
-    color: var(--gm-text-secondary);
-    text-transform: uppercase;
-    letter-spacing: 0.05em;
-}
+.gm-feature-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(280px, 1fr)); gap: 1rem; margin: 1.5rem 0; }
+.gm-feature-item { background: var(--gm-surface); border: 1px solid var(--gm-border); border-radius: var(--gm-radius-sm); padding: 1.2rem; transition: var(--gm-transition); }
+.gm-feature-item:hover { border-color: var(--gm-primary-light); box-shadow: var(--gm-shadow); transform: translateY(-1px); }
+.gm-feature-item .gm-feature-icon { font-size: 1.6rem; margin-bottom: 0.5rem; }
+.gm-feature-item h4 { font-size: 0.9rem; font-weight: 600; color: var(--gm-text); margin: 0 0 0.3rem 0; }
+.gm-feature-item p { font-size: 0.8rem; color: var(--gm-text-secondary); margin: 0; line-height: 1.5; }
 
-.gm-metric .gm-metric-delta {
-    font-size: 0.75rem;
-    margin-top: 0.2rem;
-}
+.stButton > button { border-radius: var(--gm-radius-sm) !important; font-weight: 600 !important; font-size: 0.85rem !important; transition: var(--gm-transition) !important; border: 1px solid var(--gm-border) !important; }
+.stButton > button[kind="primary"] { background: linear-gradient(135deg, var(--gm-primary), var(--gm-primary-dark)) !important; border: none !important; color: white !important; box-shadow: 0 2px 8px rgba(99,102,241,0.3) !important; }
+.stButton > button[kind="primary"]:hover { box-shadow: 0 4px 16px rgba(99,102,241,0.4) !important; transform: translateY(-1px) !important; }
 
-/* ── Score Bar ── */
-.gm-score-container {
-    margin-bottom: 1.2rem;
-}
+.stExpander { background: var(--gm-surface) !important; border: 1px solid var(--gm-border) !important; border-radius: var(--gm-radius-sm) !important; box-shadow: var(--gm-shadow) !important; margin-bottom: 0.75rem !important; }
+div[data-testid="stMetricValue"] { font-weight: 700 !important; }
 
-.gm-score-header {
-    display: flex;
-    justify-content: space-between;
-    align-items: baseline;
-    margin-bottom: 0.4rem;
-}
+.stTabs [data-baseweb="tab-list"] { gap: 0.5rem; background: var(--gm-surface); padding: 0.3rem; border-radius: var(--gm-radius-sm); border: 1px solid var(--gm-border); }
+.stTabs [data-baseweb="tab"] { border-radius: var(--gm-radius-xs) !important; font-weight: 600 !important; font-size: 0.85rem !important; }
+.stTabs [aria-selected="true"] { background: var(--gm-primary) !important; color: white !important; }
 
-.gm-score-label {
-    font-weight: 600;
-    font-size: 0.95rem;
-    color: var(--gm-text);
-}
+[data-testid="stFileUploader"] { border: 2px dashed var(--gm-border) !important; border-radius: var(--gm-radius) !important; padding: 2rem !important; background: var(--gm-surface) !important; transition: var(--gm-transition); }
+[data-testid="stFileUploader"]:hover { border-color: var(--gm-primary-light) !important; background: #f5f3ff !important; }
 
-.gm-score-value {
-    font-weight: 800;
-    font-size: 1.1rem;
-}
+.stDownloadButton > button { background: var(--gm-surface) !important; border: 1px solid var(--gm-border) !important; border-radius: var(--gm-radius-sm) !important; font-weight: 600 !important; transition: var(--gm-transition) !important; }
+.stDownloadButton > button:hover { border-color: var(--gm-primary) !important; background: #f5f3ff !important; box-shadow: var(--gm-shadow) !important; }
 
-.gm-score-track {
-    background: #e2e8f0;
-    border-radius: 12px;
-    height: 14px;
-    position: relative;
-    overflow: hidden;
-}
+.stProgress > div > div { background: linear-gradient(90deg, var(--gm-primary), var(--gm-secondary)) !important; border-radius: 10px !important; }
+.stAlert { border-radius: var(--gm-radius-sm) !important; }
 
-.gm-score-fill {
-    height: 100%;
-    border-radius: 12px;
-    transition: width 1s cubic-bezier(0.4, 0, 0.2, 1);
-    background-size: 200% 200%;
-}
-
-.gm-score-fill-green {
-    background: linear-gradient(90deg, #10b981, #34d399);
-}
-
-.gm-score-fill-yellow {
-    background: linear-gradient(90deg, #f59e0b, #fbbf24);
-}
-
-.gm-score-fill-red {
-    background: linear-gradient(90deg, #ef4444, #f87171);
-}
-
-.gm-score-threshold {
-    position: absolute;
-    top: -2px;
-    height: calc(100% + 4px);
-    width: 3px;
-    background: #1e293b;
-    border-radius: 2px;
-    z-index: 2;
-}
-
-.gm-score-meta {
-    display: flex;
-    justify-content: space-between;
-    margin-top: 0.3rem;
-    font-size: 0.75rem;
-    color: var(--gm-text-muted);
-}
-
-/* ── Section Headers ── */
-.gm-section-header {
-    display: flex;
-    align-items: center;
-    gap: 0.6rem;
-    margin: 2rem 0 1rem 0;
-    padding-bottom: 0.5rem;
-    border-bottom: 2px solid var(--gm-border);
-}
-
-.gm-section-header .gm-section-icon {
-    font-size: 1.4rem;
-}
-
-.gm-section-header h2 {
-    font-size: 1.3rem !important;
-    font-weight: 700 !important;
-    color: var(--gm-text) !important;
-    margin: 0 !important;
-    letter-spacing: -0.02em;
-}
-
-/* ── Feature Grid ── */
-.gm-feature-grid {
-    display: grid;
-    grid-template-columns: repeat(auto-fill, minmax(280px, 1fr));
-    gap: 1rem;
-    margin: 1.5rem 0;
-}
-
-.gm-feature-item {
-    background: var(--gm-surface);
-    border: 1px solid var(--gm-border);
-    border-radius: var(--gm-radius-sm);
-    padding: 1.2rem;
-    transition: var(--gm-transition);
-}
-
-.gm-feature-item:hover {
-    border-color: var(--gm-primary-light);
-    box-shadow: var(--gm-shadow);
-    transform: translateY(-1px);
-}
-
-.gm-feature-item .gm-feature-icon {
-    font-size: 1.6rem;
-    margin-bottom: 0.5rem;
-}
-
-.gm-feature-item h4 {
-    font-size: 0.9rem;
-    font-weight: 600;
-    color: var(--gm-text);
-    margin: 0 0 0.3rem 0;
-}
-
-.gm-feature-item p {
-    font-size: 0.8rem;
-    color: var(--gm-text-secondary);
-    margin: 0;
-    line-height: 1.5;
-}
-
-/* ── Streamlit Overrides ── */
-.stButton > button {
-    border-radius: var(--gm-radius-sm) !important;
-    font-weight: 600 !important;
-    font-size: 0.85rem !important;
-    padding: 0.5rem 1.2rem !important;
-    transition: var(--gm-transition) !important;
-    border: 1px solid var(--gm-border) !important;
-}
-
-.stButton > button[kind="primary"] {
-    background: linear-gradient(135deg, var(--gm-primary), var(--gm-primary-dark)) !important;
-    border: none !important;
-    color: white !important;
-    box-shadow: 0 2px 8px rgba(99,102,241,0.3) !important;
-}
-
-.stButton > button[kind="primary"]:hover {
-    box-shadow: 0 4px 16px rgba(99,102,241,0.4) !important;
-    transform: translateY(-1px) !important;
-}
-
-.stExpander {
-    background: var(--gm-surface) !important;
-    border: 1px solid var(--gm-border) !important;
-    border-radius: var(--gm-radius-sm) !important;
-    box-shadow: var(--gm-shadow) !important;
-    margin-bottom: 0.75rem !important;
-}
-
-div[data-testid="stMetricValue"] {
-    font-weight: 700 !important;
-}
-
-.stTabs [data-baseweb="tab-list"] {
-    gap: 0.5rem;
-    background: var(--gm-surface);
-    padding: 0.3rem;
-    border-radius: var(--gm-radius-sm);
-    border: 1px solid var(--gm-border);
-}
-
-.stTabs [data-baseweb="tab"] {
-    border-radius: var(--gm-radius-xs) !important;
-    font-weight: 600 !important;
-    font-size: 0.85rem !important;
-    padding: 0.5rem 1rem !important;
-}
-
-.stTabs [aria-selected="true"] {
-    background: var(--gm-primary) !important;
-    color: white !important;
-}
-
-/* File uploader */
-[data-testid="stFileUploader"] {
-    border: 2px dashed var(--gm-border) !important;
-    border-radius: var(--gm-radius) !important;
-    padding: 2rem !important;
-    background: var(--gm-surface) !important;
-    transition: var(--gm-transition);
-}
-
-[data-testid="stFileUploader"]:hover {
-    border-color: var(--gm-primary-light) !important;
-    background: #f5f3ff !important;
-}
-
-/* Download buttons */
-.stDownloadButton > button {
-    background: var(--gm-surface) !important;
-    border: 1px solid var(--gm-border) !important;
-    border-radius: var(--gm-radius-sm) !important;
-    font-weight: 600 !important;
-    transition: var(--gm-transition) !important;
-}
-
-.stDownloadButton > button:hover {
-    border-color: var(--gm-primary) !important;
-    background: #f5f3ff !important;
-    box-shadow: var(--gm-shadow) !important;
-}
-
-/* Progress bar */
-.stProgress > div > div {
-    background: linear-gradient(90deg, var(--gm-primary), var(--gm-secondary)) !important;
-    border-radius: 10px !important;
-}
-
-/* Alert boxes */
-.stAlert {
-    border-radius: var(--gm-radius-sm) !important;
-}
-
-/* ── Funding Probability Gauge ── */
-.gm-gauge {
-    text-align: center;
-    padding: 1rem;
-}
-
-.gm-gauge-circle {
-    width: 120px;
-    height: 120px;
-    border-radius: 50%;
-    display: flex;
-    align-items: center;
-    justify-content: center;
-    margin: 0 auto 0.5rem auto;
-    font-size: 1.8rem;
-    font-weight: 800;
-    color: white;
-    position: relative;
-}
-
-.gm-gauge-high {
-    background: conic-gradient(#10b981 0deg, #10b981 var(--pct-deg), #e2e8f0 var(--pct-deg));
-}
-
-.gm-gauge-medium {
-    background: conic-gradient(#f59e0b 0deg, #f59e0b var(--pct-deg), #e2e8f0 var(--pct-deg));
-}
-
-.gm-gauge-low {
-    background: conic-gradient(#ef4444 0deg, #ef4444 var(--pct-deg), #e2e8f0 var(--pct-deg));
-}
-
-/* ── Responsive ── */
 @media (max-width: 768px) {
     .gm-hero { padding: 1.5rem 1rem; }
     .gm-hero h1 { font-size: 1.6rem !important; }
@@ -618,7 +250,7 @@ div[data-testid="stMetricValue"] {
 </style>
 """, unsafe_allow_html=True)
 
-# Initialize cache in session state
+# Initialize cache
 if "call_cache" not in st.session_state:
     st.session_state.call_cache = CallCache(ttl_minutes=30)
 
@@ -639,12 +271,8 @@ def get_llm_client() -> OpenAI:
 def call_llm(client, sys_p, usr_p, temp=0.3, max_tok=4000, js=True):
     kw = dict(
         model=MODEL_NAME,
-        messages=[
-            {"role": "system", "content": sys_p},
-            {"role": "user", "content": usr_p},
-        ],
-        temperature=temp,
-        max_tokens=max_tok,
+        messages=[{"role": "system", "content": sys_p}, {"role": "user", "content": usr_p}],
+        temperature=temp, max_tokens=max_tok,
     )
     if js:
         kw["response_format"] = {"type": "json_object"}
@@ -666,7 +294,6 @@ def call_llm(client, sys_p, usr_p, temp=0.3, max_tok=4000, js=True):
 
 
 def llm_call_wrapper(client):
-    """Create a simple LLM call function for modules that need it."""
     def _call(sys_prompt, usr_prompt):
         return call_llm(client, sys_prompt, usr_prompt, temp=0.3, max_tok=3000, js=True)
     return _call
@@ -714,7 +341,6 @@ def build_eval_prompt(crit, sec_text, cross_ctx, kb_ctx, action_type, call_ctx="
     qs = "\n".join(f"  • {q}" for q in crit.official_questions)
     checks = "\n".join(f"  • {c}" for c in crit.practical_checklist)
     sigs = ", ".join(crit.sub_signals)
-
     p = f"""## EVALUATE: {crit.name} ({action_type})
 
 ### OFFICIAL EC EVALUATION QUESTIONS:
@@ -727,7 +353,6 @@ def build_eval_prompt(crit, sec_text, cross_ctx, kb_ctx, action_type, call_ctx="
 
 ### SCORING: 0-5 half-points. Threshold: {crit.threshold}/{crit.max_score}
 """
-
     if call_ctx:
         p += f"""
 ### CALL/TOPIC SPECIFIC CONTEXT:
@@ -735,7 +360,6 @@ def build_eval_prompt(crit, sec_text, cross_ctx, kb_ctx, action_type, call_ctx="
 
 IMPORTANT: Check alignment between proposal and topic-level expected outcomes.
 """
-
     p += f"""
 ### KNOWLEDGE BASE:
 {kb_ctx}
@@ -833,7 +457,6 @@ def _calc_funding_pct(total, max_score, threshold, all_met):
         return 5
     if max_score <= 0:
         return 5
-
     ratio = total / max_score
     if ratio >= 0.95:
         base = 85
@@ -849,11 +472,9 @@ def _calc_funding_pct(total, max_score, threshold, all_met):
         base = 10
     else:
         base = 5
-
     margin = total - threshold
     if margin < 1.0:
         base = int(base * 0.7)
-
     return min(base, 95)
 
 
@@ -863,16 +484,13 @@ def _check_double_penalization(criteria: List[Dict]) -> List[str]:
     for c in criteria:
         for w in c.get("weaknesses", []):
             all_weaknesses.append((c.get("criterion", "?"), set(w.lower().split())))
-
     for i, (c1, w1) in enumerate(all_weaknesses):
         for j, (c2, w2) in enumerate(all_weaknesses):
             if i >= j or c1 == c2:
                 continue
             overlap = len(w1 & w2) / max(len(w1 | w2), 1)
             if overlap > 0.5:
-                warnings.append(
-                    f"⚠️ Benzer zayıflık {c1} ve {c2}'de tespit edildi — çift cezalandırma riski"
-                )
+                warnings.append(f"⚠️ Benzer zayıflık {c1} ve {c2}'de tespit edildi — çift cezalandırma riski")
                 break
     return warnings
 
@@ -892,11 +510,7 @@ class Evaluator:
             "Impact": [SectionType.IMPACT, SectionType.DISSEMINATION, SectionType.EXPLOITATION],
             "Implementation": [SectionType.IMPLEMENTATION, SectionType.WORK_PACKAGES, SectionType.RISK_TABLE],
         }
-        texts = [
-            proposal.sections[s].content
-            for s in mapping.get(criterion, [])
-            if s in proposal.sections
-        ]
+        texts = [proposal.sections[s].content for s in mapping.get(criterion, []) if s in proposal.sections]
         if texts:
             return "\n\n".join(texts)
         t = proposal.full_text
@@ -909,9 +523,7 @@ class Evaluator:
 
     def _cross_ctx(self, proposal):
         return "\n".join(
-            f"[{s.value}]: {d.content[:400]}"
-            for s, d in proposal.sections.items()
-            if d.word_count > 50
+            f"[{s.value}]: {d.content[:400]}" for s, d in proposal.sections.items() if d.word_count > 50
         )
 
     def _get_rag_context(self, criterion, action_type, section_text, use_ai_rag=True):
@@ -931,17 +543,13 @@ class Evaluator:
         for i, cc in enumerate(cfg.criteria):
             if on_progress:
                 on_progress(f"📝 {i + 1}/{len(cfg.criteria)}: {cc.name}...")
-
             sec = self._section_text(proposal, cc.name)
             cross = self._cross_ctx(proposal)
-
             if on_progress:
                 on_progress(f"🧠 {cc.name} bilgi tabanı hazırlanıyor...")
             kb_ctx = self._get_rag_context(cc.name, action_type.value, sec, use_ai_rag)
-
             prompt = build_eval_prompt(cc, sec, cross, kb_ctx, action_type.value, call_ctx)
             raw = call_llm(self.client, SYS_ESR, prompt)
-
             try:
                 r = json.loads(raw)
             except json.JSONDecodeError:
@@ -953,7 +561,6 @@ class Evaluator:
                     "esr_comment": "Parse hatası.", "alternative_reading": "",
                     "topic_alignment": "",
                 }
-
             s = max(0.0, min(5.0, round(float(r.get("score", 0)) * 2) / 2))
             r["score"] = s
             r["confidence_low"] = max(0.0, float(r.get("confidence_low", s - 0.5)))
@@ -1000,12 +607,11 @@ class Evaluator:
             for k, v in cc2.items() if v > 1 and k in WEAKNESS_TAXONOMY
         ]
         results["double_penalization_warnings"] = _check_double_penalization(results["criteria"])
-
         return results
 
 
 # ═══════════════════════════════════════════════════════════
-# UI COMPONENTS — MODERN
+# UI COMPONENTS
 # ═══════════════════════════════════════════════════════════
 def render_header():
     st.markdown("""
@@ -1025,7 +631,7 @@ def render_header():
 
 
 def render_call_dashboard():
-    """Render live call data dashboard with modern UI."""
+    """Render live call data dashboard — ALL calls + auto-refresh."""
     st.markdown("""
     <div class="gm-section-header">
         <span class="gm-section-icon">📡</span>
@@ -1033,7 +639,8 @@ def render_call_dashboard():
     </div>
     """, unsafe_allow_html=True)
 
-    col1, col2, col3 = st.columns(3)
+    # Filters
+    col1, col2, col3, col4 = st.columns([3, 2, 2, 1])
     with col1:
         search = st.text_input("🔍 Arama", placeholder="Anahtar kelime...")
     with col2:
@@ -1042,83 +649,226 @@ def render_call_dashboard():
             format_func=lambda x: x if x else "Tümü",
         )
     with col3:
-        programme_filter = st.selectbox(
-            "🏛️ Program", ["HORIZON", ""],
-            format_func=lambda x: x if x else "Tümü",
+        dest_options = [""] + sorted(set(
+            c.get("destination", "") for c in HORIZON_CALLS_DB if c.get("destination")
+        ))
+        dest_filter = st.selectbox(
+            "🏛️ Küme/Program", dest_options,
+            format_func=lambda x: x.split("–")[-1].strip() if "–" in x else (x if x else "Tümü"),
         )
+    with col4:
+        st.markdown("<div style='height:1.6rem'></div>", unsafe_allow_html=True)
+        refresh_btn = st.button("🔄", help="Yenile", use_container_width=True)
 
-    cache_key = f"calls_{search}_{status_filter}_{programme_filter}"
+    # Auto-refresh
+    auto_col1, auto_col2 = st.columns([1, 3])
+    with auto_col1:
+        auto_refresh = st.checkbox("⏰ Otomatik güncelle", value=False)
+    with auto_col2:
+        if auto_refresh:
+            refresh_interval = st.select_slider(
+                "Aralık", options=[30, 60, 120, 300], value=60,
+                format_func=lambda x: f"{x}s" if x < 60 else f"{x // 60}dk",
+            )
+            st.caption(f"Her {refresh_interval}s'de bir yenilenir")
+        else:
+            refresh_interval = 300
+
+    # Source
+    source_col1, source_col2 = st.columns(2)
+    with source_col1:
+        use_live_api = st.checkbox("🌐 EC API'den canlı çek", value=True,
+                                    help="Açıksa EC API'den güncel veri çeker, kapalıysa yerel veritabanı")
+    with source_col2:
+        if use_live_api:
+            max_results = st.number_input("Maks sonuç", min_value=10, max_value=500, value=100, step=50)
+        else:
+            max_results = len(HORIZON_CALLS_DB)
+
+    # Auto-refresh logic
+    if auto_refresh:
+        last_refresh = st.session_state.get("last_refresh_time", 0)
+        if time.time() - last_refresh > refresh_interval:
+            st.session_state["last_refresh_time"] = time.time()
+            st.session_state.call_cache.clear()
+            st.rerun()
+
+    if refresh_btn:
+        st.session_state.call_cache.clear()
+        if "dashboard_calls" in st.session_state:
+            del st.session_state["dashboard_calls"]
+        st.rerun()
+
+    # Fetch
+    cache_key = f"dash_{search}_{status_filter}_{dest_filter}_{use_live_api}_{max_results}"
     cached = st.session_state.call_cache.get(cache_key)
 
     if cached:
         calls, total = cached
     else:
-        with st.spinner("📡 EC API'den çağrılar çekiliyor..."):
-            calls, total = fetch_horizon_calls(
-                programme=programme_filter,
-                status=status_filter,
-                search_text=search,
-                page_size=30,
-            )
-            st.session_state.call_cache.set(cache_key, (calls, total))
+        if use_live_api:
+            with st.spinner("📡 EC API'den çağrılar çekiliyor (tüm sayfalar)..."):
+                api_calls, api_total = fetch_horizon_calls(
+                    programme="HORIZON", status=status_filter, search_text=search,
+                    page_size=100, max_pages=max(1, max_results // 100), fetch_all=True,
+                )
+            api_ids = set(c.get("call_id", "") for c in api_calls)
+            local_calls = [lc for lc in HORIZON_CALLS_DB if lc["call_id"] not in api_ids]
+            all_calls = api_calls + local_calls
+        else:
+            all_calls = list(HORIZON_CALLS_DB)
+
+        # Apply filters
+        filtered = all_calls
+        if status_filter:
+            filtered = [c for c in filtered if c.get("status", "").lower() == status_filter.lower()]
+        if dest_filter:
+            filtered = [c for c in filtered if dest_filter.lower() in c.get("destination", "").lower()]
+        if search:
+            kw = search.lower()
+            filtered = [
+                c for c in filtered
+                if kw in c.get("title", "").lower()
+                or kw in c.get("call_id", "").lower()
+                or kw in " ".join(c.get("keywords", [])).lower()
+                or kw in c.get("scope", "").lower()
+                or kw in c.get("destination", "").lower()
+            ]
+        calls = filtered
+        total = len(calls)
+        st.session_state.call_cache.set(cache_key, (calls, total))
 
     if not calls:
-        st.info("Çağrı bulunamadı veya API yanıt vermedi. Arama kriterlerini değiştirin.")
+        st.info("Çağrı bulunamadı. Filtreleri değiştirin veya yenileyin.")
         return None
 
-    st.markdown(f"**{total}** çağrı bulundu (ilk {len(calls)} gösteriliyor)")
+    # Stats bar
+    open_count = sum(1 for c in calls if c.get("status") == "Open")
+    forth_count = sum(1 for c in calls if c.get("status") == "Forthcoming")
+    closed_count = sum(1 for c in calls if c.get("status") == "Closed")
 
-    # ── Excel Export ──
+    s1, s2, s3, s4 = st.columns(4)
+    with s1:
+        st.markdown(f'<div class="gm-metric"><div class="gm-metric-value">{total}</div><div class="gm-metric-label">Toplam</div></div>', unsafe_allow_html=True)
+    with s2:
+        st.markdown(f'<div class="gm-metric"><div class="gm-metric-value" style="color:#10b981;">{open_count}</div><div class="gm-metric-label">Açık</div></div>', unsafe_allow_html=True)
+    with s3:
+        st.markdown(f'<div class="gm-metric"><div class="gm-metric-value" style="color:#f59e0b;">{forth_count}</div><div class="gm-metric-label">Yaklaşan</div></div>', unsafe_allow_html=True)
+    with s4:
+        st.markdown(f'<div class="gm-metric"><div class="gm-metric-value" style="color:#ef4444;">{closed_count}</div><div class="gm-metric-label">Kapanmış</div></div>', unsafe_allow_html=True)
+
+    st.markdown("<div style='height:0.5rem'></div>", unsafe_allow_html=True)
+
+    # Excel export
     excel_bytes = calls_to_excel_bytes(calls)
     st.download_button(
-        label="📥 Çağrıları Excel Olarak İndir",
-        data=excel_bytes,
-        file_name="horizon_calls.xlsx",
+        label=f"📥 Tüm Çağrıları Excel Olarak İndir ({total} çağrı)",
+        data=excel_bytes, file_name="horizon_calls.xlsx",
         mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
         use_container_width=True,
     )
 
-    st.markdown("<div style='height:0.5rem'></div>", unsafe_allow_html=True)
+    # Sort
+    sort_col1, _ = st.columns([1, 3])
+    with sort_col1:
+        sort_by = st.selectbox(
+            "Sırala", ["deadline", "title", "status"],
+            format_func=lambda x: {"deadline": "📅 Son Tarih", "title": "🔤 Başlık", "status": "📋 Durum"}[x],
+            label_visibility="collapsed",
+        )
+    if sort_by == "deadline":
+        calls = sorted(calls, key=lambda c: c.get("deadline", "9999"))
+    elif sort_by == "title":
+        calls = sorted(calls, key=lambda c: c.get("title", "").lower())
+    elif sort_by == "status":
+        order = {"Open": 0, "Forthcoming": 1, "Closed": 2}
+        calls = sorted(calls, key=lambda c: order.get(c.get("status", ""), 9))
 
-    # ── Display calls as modern cards ──
+    # Pagination
+    items_per_page = 20
+    total_pages = max(1, (total + items_per_page - 1) // items_per_page)
+    if total > items_per_page:
+        _, pc, _ = st.columns([1, 2, 1])
+        with pc:
+            current_page = st.number_input(f"Sayfa (1-{total_pages})", min_value=1, max_value=total_pages, value=1, step=1)
+        start_idx = (current_page - 1) * items_per_page
+        end_idx = min(start_idx + items_per_page, total)
+        page_calls = calls[start_idx:end_idx]
+        st.caption(f"Gösterilen: {start_idx + 1}-{end_idx} / {total}")
+    else:
+        page_calls = calls
+        current_page = 1
+
+    # Call cards
     selected_call = None
-    for i, call in enumerate(calls):
+    for i, call in enumerate(page_calls):
         status = call.get("status", "?")
-        badge_class = {
-            "Open": "gm-badge-open",
-            "Forthcoming": "gm-badge-forthcoming",
-            "Closed": "gm-badge-closed",
-        }.get(status, "gm-badge-closed")
-
+        badge_class = {"Open": "gm-badge-open", "Forthcoming": "gm-badge-forthcoming", "Closed": "gm-badge-closed"}.get(status, "gm-badge-closed")
         action_types = ", ".join(call.get("action_types", ["?"]))
         deadline = call.get("deadline", "N/A")
         if deadline and len(deadline) > 10:
             deadline = deadline[:10]
+        destination = call.get("destination", "")
+        dest_short = destination.split("–")[-1].strip() if "–" in destination else destination
+        budget = call.get("budget_per_project", call.get("budget_total", ""))
 
-        st.markdown(
-            f"""
-            <div class="gm-call-card">
-                <div style="display:flex;justify-content:space-between;align-items:center;">
-                    <div>
+        days_label = ""
+        if deadline and deadline != "N/A":
+            try:
+                dl = datetime.strptime(deadline[:10], "%Y-%m-%d")
+                days_left = (dl - datetime.now()).days
+                if days_left > 0:
+                    if days_left <= 7:
+                        days_label = f'<span style="color:#ef4444;font-weight:700;font-size:0.75rem;">⏰ {days_left} gün kaldı!</span>'
+                    elif days_left <= 30:
+                        days_label = f'<span style="color:#f59e0b;font-weight:600;font-size:0.75rem;">📅 {days_left} gün kaldı</span>'
+                    else:
+                        days_label = f'<span style="color:#64748b;font-size:0.75rem;">📅 {days_left} gün</span>'
+                elif days_left == 0:
+                    days_label = '<span style="color:#ef4444;font-weight:700;font-size:0.75rem;">🔥 Bugün son gün!</span>'
+            except Exception:
+                pass
+
+        global_idx = (current_page - 1) * items_per_page + i
+
+        st.markdown(f"""
+        <div class="gm-call-card">
+            <div style="display:flex;justify-content:space-between;align-items:flex-start;">
+                <div style="flex:1;">
+                    <div style="display:flex;align-items:center;gap:0.5rem;flex-wrap:wrap;">
                         <span class="{badge_class}">{status}</span>
-                        <h4 style="margin:0.6rem 0 0.2rem 0;">{call.get('title', 'N/A')[:120]}</h4>
-                        <p style="color:#667085;margin:0;">{call.get('call_id', 'N/A')}</p>
-                        <p style="color:#667085;margin:0.3rem 0 0 0;">🏷️ {action_types} · 📅 {deadline}</p>
+                        {f'<span style="background:#f1f5f9;padding:0.15rem 0.5rem;border-radius:12px;font-size:0.7rem;color:#475569;border:1px solid #e2e8f0;">{dest_short}</span>' if dest_short else ''}
+                        {days_label}
+                    </div>
+                    <h4 style="margin:0.6rem 0 0.2rem 0;font-size:0.95rem;line-height:1.4;">{call.get('title', 'N/A')[:150]}</h4>
+                    <p style="color:#667085;margin:0;font-size:0.82rem;">{call.get('call_id', 'N/A')}</p>
+                    <div style="display:flex;gap:1rem;margin-top:0.4rem;flex-wrap:wrap;">
+                        <span style="color:#667085;font-size:0.8rem;">🏷️ {action_types}</span>
+                        <span style="color:#667085;font-size:0.8rem;">📅 {deadline}</span>
+                        {f'<span style="color:#667085;font-size:0.8rem;">💰 {budget}</span>' if budget else ''}
                     </div>
                 </div>
             </div>
-            """,
-            unsafe_allow_html=True,
-        )
+        </div>
+        """, unsafe_allow_html=True)
 
-        if st.button("Bu çağrıyı seç", key=f"call_{i}", use_container_width=True):
+        if st.button("Bu çağrıyı seç →", key=f"call_{global_idx}", use_container_width=True):
             selected_call = call
+
+    if total > items_per_page:
+        st.caption(f"Sayfa {current_page}/{total_pages} · Toplam {total} çağrı")
+
+    last_t = st.session_state.get("last_refresh_time", 0)
+    if last_t:
+        ago = int(time.time() - last_t)
+        st.caption(f"🕐 Son güncelleme: {ago}s önce" if ago < 60 else f"🕐 Son güncelleme: {ago // 60}dk önce")
+    if auto_refresh:
+        st.caption(f"⏰ Otomatik güncelleme aktif ({refresh_interval}s)")
 
     return selected_call
 
 
 def render_call_detail(call_data: Dict) -> Dict:
-    """Show selected call details and fetch topic info."""
     st.markdown("""
     <div class="gm-section-header">
         <span class="gm-section-icon">📋</span>
@@ -1130,10 +880,7 @@ def render_call_detail(call_data: Dict) -> Dict:
     with col1:
         st.metric("Çağrı", call_data.get("call_id", "N/A"))
     with col2:
-        st.metric(
-            "Son Tarih",
-            call_data.get("deadline", "N/A")[:10] if call_data.get("deadline") else "N/A",
-        )
+        st.metric("Son Tarih", call_data.get("deadline", "N/A")[:10] if call_data.get("deadline") else "N/A")
     with col3:
         action_type = detect_action_type_from_call(call_data)
         st.metric("Aksiyon Türü", action_type)
@@ -1160,24 +907,18 @@ def render_call_detail(call_data: Dict) -> Dict:
 
     call_context = build_call_specific_criteria(call_data, topic_details)
     st.success(f"✅ Aksiyon türü: **{action_type}** | Çağrı-spesifik değerlendirme bağlamı hazır")
-
     return call_context
 
 
 def render_score_bar(score, mx, thr, label):
     pct = score / mx * 100 if mx > 0 else 0
     tp = thr / mx * 100 if mx > 0 else 0
-
     if score >= thr + 1:
-        fill_class = "gm-score-fill-green"
-        color = "#10b981"
+        fill_class, color = "gm-score-fill-green", "#10b981"
     elif score >= thr:
-        fill_class = "gm-score-fill-yellow"
-        color = "#f59e0b"
+        fill_class, color = "gm-score-fill-yellow", "#f59e0b"
     else:
-        fill_class = "gm-score-fill-red"
-        color = "#ef4444"
-
+        fill_class, color = "gm-score-fill-red", "#ef4444"
     st.markdown(f"""
     <div class="gm-score-container">
         <div class="gm-score-header">
@@ -1198,8 +939,7 @@ def render_score_bar(score, mx, thr, label):
 
 def render_eligibility(elig):
     icon_map = {"pass": "✅", "fail": "❌", "warning": "⚠️", "info": "ℹ️", "unable": "❓"}
-    status_icon = "✅" if elig.is_eligible else "❌"
-    with st.expander(f"{status_icon} Uygunluk Kontrolü", expanded=not elig.is_eligible):
+    with st.expander(f"{'✅' if elig.is_eligible else '❌'} Uygunluk Kontrolü", expanded=not elig.is_eligible):
         for ch in elig.results:
             st.markdown(f"{icon_map.get(ch.status.value, '')} **{ch.check_name}**: {ch.message}")
             if ch.details:
@@ -1211,36 +951,19 @@ def render_criterion(crit, coach, show_coach):
     score = crit.get("score", 0)
     mx = crit.get("max_score", 5)
     thr = crit.get("threshold", 3)
-
     render_score_bar(score, mx, thr, name)
 
     c1, c2, c3 = st.columns(3)
     with c1:
-        st.markdown(f"""
-        <div class="gm-metric">
-            <div class="gm-metric-value" style="font-size:1.2rem;">{crit.get('confidence_low', '?')} – {crit.get('confidence_high', '?')}</div>
-            <div class="gm-metric-label">Güven Aralığı</div>
-        </div>
-        """, unsafe_allow_html=True)
+        st.markdown(f'<div class="gm-metric"><div class="gm-metric-value" style="font-size:1.2rem;">{crit.get("confidence_low", "?")} – {crit.get("confidence_high", "?")}</div><div class="gm-metric-label">Güven Aralığı</div></div>', unsafe_allow_html=True)
     with c2:
         risk = crit.get("consensus_risk", "?")
         ri = {"low": "🟢", "medium": "🟡", "high": "🔴"}.get(risk, "⚪")
-        st.markdown(f"""
-        <div class="gm-metric">
-            <div class="gm-metric-value" style="font-size:1.2rem;">{ri} {risk}</div>
-            <div class="gm-metric-label">Uzlaşma Riski</div>
-        </div>
-        """, unsafe_allow_html=True)
+        st.markdown(f'<div class="gm-metric"><div class="gm-metric-value" style="font-size:1.2rem;">{ri} {risk}</div><div class="gm-metric-label">Uzlaşma Riski</div></div>', unsafe_allow_html=True)
     with c3:
-        st.markdown(f"""
-        <div class="gm-metric">
-            <div class="gm-metric-value" style="font-size:1.2rem;">{crit.get('weighted_score', 0):.1f}</div>
-            <div class="gm-metric-label">Ağırlıklı Puan</div>
-        </div>
-        """, unsafe_allow_html=True)
+        st.markdown(f'<div class="gm-metric"><div class="gm-metric-value" style="font-size:1.2rem;">{crit.get("weighted_score", 0):.1f}</div><div class="gm-metric-label">Ağırlıklı Puan</div></div>', unsafe_allow_html=True)
 
     st.markdown("")
-
     st.markdown("#### 📋 ESR Yorumu")
     st.info(crit.get("esr_comment", "N/A"))
 
@@ -1266,9 +989,7 @@ def render_criterion(crit, coach, show_coach):
     cats = crit.get("weakness_categories", [])
     if cats:
         badges = " ".join(
-            f'<span style="background:#f1f5f9;border:1px solid #e2e8f0;padding:0.2rem 0.6rem;'
-            f'border-radius:12px;font-size:0.75rem;font-weight:600;color:#475569;margin-right:0.3rem;">'
-            f'{WEAKNESS_TAXONOMY.get(c, {}).get("label", c)}</span>'
+            f'<span style="background:#f1f5f9;border:1px solid #e2e8f0;padding:0.2rem 0.6rem;border-radius:12px;font-size:0.75rem;font-weight:600;color:#475569;margin-right:0.3rem;">{WEAKNESS_TAXONOMY.get(c, {}).get("label", c)}</span>'
             for c in cats
         )
         st.markdown(f"**🏷️ Kategoriler:** {badges}", unsafe_allow_html=True)
@@ -1294,9 +1015,7 @@ def render_criterion(crit, coach, show_coach):
         st.markdown("---")
         st.markdown("#### 🎯 Koçluk Önerileri")
         for imp in coach.get("improvements", []):
-            pri = imp.get("priority", "?")
-            gain = imp.get("expected_score_gain", "?")
-            with st.expander(f"🔧 P{pri}: {imp.get('title', '?')} ({gain})"):
+            with st.expander(f"🔧 P{imp.get('priority', '?')}: {imp.get('title', '?')} ({imp.get('expected_score_gain', '?')})"):
                 st.markdown(f"**Problem:** {imp.get('problem', '')}")
                 st.markdown(f"**Etki:** {imp.get('impact', '')}")
                 st.markdown(f"**Çözüm:** {imp.get('solution', '')}")
@@ -1318,29 +1037,19 @@ def render_overall(results):
     met = results["total_threshold_met"]
     fp = results.get("funding_probability", "very_low")
     fp_pct = results.get("funding_probability_pct", 0)
-
     pl = {"high": "🟢 Yüksek", "medium": "🟡 Orta", "low": "🟠 Düşük", "very_low": "🔴 Çok Düşük"}
     fp_label = pl.get(fp, "?")
-
     ok = sum(1 for c in results["criteria"] if c.get("threshold_met"))
     total_criteria = len(results["criteria"])
     sys_issues = len(results.get("cross_cutting_issues", []))
 
-    # Color for total
-    if met:
-        total_color = "#10b981"
-    elif tw >= thr * 0.8:
-        total_color = "#f59e0b"
-    else:
-        total_color = "#ef4444"
-
-    # Color for funding
+    total_color = "#10b981" if met else "#f59e0b" if tw >= thr * 0.8 else "#ef4444"
     fp_color = {"high": "#10b981", "medium": "#f59e0b", "low": "#f97316", "very_low": "#ef4444"}.get(fp, "#ef4444")
 
     c1, c2, c3, c4 = st.columns(4)
-    with c1:
-        delta_val = tw - thr
-        delta_sign = "+" if delta_val >= 0 else ""
+    delta_val = tw - thr
+    delta_sign = "+" if delta_val >= 0 else ""
+        with c1:
         st.markdown(f"""
         <div class="gm-metric">
             <div class="gm-metric-value" style="color:{total_color};">{tw}/{tm}</div>
@@ -1349,7 +1058,6 @@ def render_overall(results):
         </div>
         """, unsafe_allow_html=True)
     with c2:
-        pct_deg = int(fp_pct * 3.6)
         st.markdown(f"""
         <div class="gm-metric">
             <div class="gm-metric-value" style="color:{fp_color};">%{fp_pct}</div>
@@ -1378,13 +1086,11 @@ def render_overall(results):
 
     st.markdown("<div style='height:1rem'></div>", unsafe_allow_html=True)
 
-    # Score bars
     cols = st.columns(len(results["criteria"]))
     for i, cr in enumerate(results["criteria"]):
         with cols[i]:
             render_score_bar(cr["score"], cr["max_score"], cr["threshold"], cr.get("criterion", f"K{i + 1}"))
 
-    # Cross-cutting
     cross = results.get("cross_cutting_issues", [])
     if cross:
         st.markdown("### ⚠️ Kriterler Arası Sistemik Sorunlar")
@@ -1399,40 +1105,25 @@ def render_overall(results):
 
 
 # ═══════════════════════════════════════════════════════════
-# MAIN
+# PAGES
 # ═══════════════════════════════════════════════════════════
-def main():
-    render_header()
-
-    page = st.sidebar.radio(
-        "📌 Sayfa",
-        ["🔬 Değerlendirme", "📡 Canlı Çağrılar"],
-        label_visibility="collapsed",
-    )
-
-    if page == "📡 Canlı Çağrılar":
-        render_calls_page()
-    else:
-        render_evaluation_page()
-
-
 def render_calls_page():
-    """Page: Live call dashboard."""
     selected_call = render_call_dashboard()
-
     if selected_call:
         st.markdown("---")
         call_ctx = render_call_detail(selected_call)
-
         st.session_state["selected_call"] = selected_call
         st.session_state["call_context"] = call_ctx
-
-        st.info("💡 Bu çağrı için değerlendirme yapmak isterseniz **Değerlendirme** sayfasına geçin ve teklif yükleyin.")
+        col_a, col_b = st.columns(2)
+        with col_a:
+            st.info("💡 Değerlendirme yapmak için **Değerlendirme** sayfasına geçin.")
+        with col_b:
+            if st.button("🔬 Değerlendirmeye Git", type="primary", use_container_width=True):
+                st.session_state["page_nav"] = "eval"
+                st.rerun()
 
 
 def render_evaluation_page():
-    """Page: Proposal evaluation with modern UI."""
-
     # ── SIDEBAR ──
     with st.sidebar:
         st.markdown("## ⚙️ Ayarlar")
@@ -1447,7 +1138,7 @@ def render_evaluation_page():
             use_call = st.checkbox("Çağrı bağlamını kullan", value=True)
         else:
             labels = {
-                                ActionType.RIA: "🔬 RIA",
+                ActionType.RIA: "🔬 RIA",
                 ActionType.IA: "🚀 IA",
                 ActionType.CSA: "🤝 CSA",
                 ActionType.MSCA_DN: "🎓 MSCA-DN",
@@ -1455,14 +1146,9 @@ def render_evaluation_page():
                 ActionType.EIC_ACCELERATOR: "📈 EIC Accelerator",
                 ActionType.ERC_STG: "⭐ ERC StG",
             }
-            action = st.selectbox(
-                "Aksiyon Türü",
-                list(labels.keys()),
-                format_func=lambda x: labels[x],
-            )
+            action = st.selectbox("Aksiyon Türü", list(labels.keys()), format_func=lambda x: labels[x])
             use_call = False
 
-        # Check for auto-detected action type from call matching
         auto_action = st.session_state.get("auto_action_type", None)
         if auto_action and not has_call:
             action = auto_action
@@ -1477,35 +1163,21 @@ def render_evaluation_page():
 
         st.markdown("---")
         mode = st.radio(
-            "Çıktı",
-            ["both", "esr_only", "coaching_only"],
-            format_func=lambda x: {
-                "both": "📋+🎯 Tam",
-                "esr_only": "📋 ESR",
-                "coaching_only": "🎯 Koçluk",
-            }[x],
+            "Çıktı", ["both", "esr_only", "coaching_only"],
+            format_func=lambda x: {"both": "📋+🎯 Tam", "esr_only": "📋 ESR", "coaching_only": "🎯 Koçluk"}[x],
         )
 
         st.markdown("---")
-        manual_ctx = st.text_area(
-            "Ek Bağlam (opsiyonel)",
-            height=80,
-            placeholder="Work Programme scope, expected outcomes...",
-        )
-
+        manual_ctx = st.text_area("Ek Bağlam (opsiyonel)", height=80, placeholder="Work Programme scope, expected outcomes...")
         blind = st.checkbox("🔒 Kimlik taraması", value=cfg.blind_evaluation)
 
         st.markdown("---")
         st.markdown("### 🧠 AI Ayarları")
-        use_ai_rag = st.checkbox(
-            "RAG ile zenginleştirilmiş değerlendirme",
-            value=True,
-            help="AI bilgi tabanını kullanarak her kriter için özel rehberlik üretir",
-        )
-
+        use_ai_rag = st.checkbox("RAG ile zenginleştirilmiş değerlendirme", value=True,
+                                  help="AI bilgi tabanını kullanarak her kriter için özel rehberlik üretir")
         st.caption("⚠️ Bu araç resmî EC değerlendirmesinin yerini almaz.")
 
-    # ── MAIN AREA ──
+    # ── MAIN ──
     st.markdown("""
     <div class="gm-section-header">
         <span class="gm-section-icon">📤</span>
@@ -1513,58 +1185,23 @@ def render_evaluation_page():
     </div>
     """, unsafe_allow_html=True)
 
-    uploaded = st.file_uploader(
-        "Horizon Europe Part B (PDF / DOCX)", type=["pdf", "docx", "doc"]
-    )
+    uploaded = st.file_uploader("Horizon Europe Part B (PDF / DOCX)", type=["pdf", "docx", "doc"])
 
     if not uploaded:
-        # Feature grid instead of table
         st.markdown("""
         <div class="gm-section-header">
             <span class="gm-section-icon">🎯</span>
             <h2>GrantMirror-AI Ne Yapar?</h2>
         </div>
         <div class="gm-feature-grid">
-            <div class="gm-feature-item">
-                <div class="gm-feature-icon">📡</div>
-                <h4>Canlı Çağrı Verisi</h4>
-                <p>EC API'den açık çağrıları gerçek zamanlı çeker, topic detaylarını gösterir, Excel'e aktarır</p>
-            </div>
-            <div class="gm-feature-item">
-                <div class="gm-feature-icon">🎯</div>
-                <h4>AI Çağrı Eşleştirme</h4>
-                <p>Teklifinizi en uygun Horizon Europe çağrılarıyla otomatik eşleştirir, uyum skoru verir</p>
-            </div>
-            <div class="gm-feature-item">
-                <div class="gm-feature-icon">🧠</div>
-                <h4>RAG Bilgi Motoru</h4>
-                <p>Kriter bazlı AI-destekli bilgi sentezi, 129 ESR + 1745 yorum analizinden</p>
-            </div>
-            <div class="gm-feature-item">
-                <div class="gm-feature-icon">📋</div>
-                <h4>ESR Simülasyonu</h4>
-                <p>Çağrıya özel kriter bazlı hakem değerlendirmesi, gerçek ESR formatında</p>
-            </div>
-            <div class="gm-feature-item">
-                <div class="gm-feature-icon">🎯</div>
-                <h4>Akıllı Koçluk</h4>
-                <p>Somut düzeltme önerileri, önceliklendirilmiş, beklenen puan etkisiyle</p>
-            </div>
-            <div class="gm-feature-item">
-                <div class="gm-feature-icon">📊</div>
-                <h4>Güven & Uzlaşma</h4>
-                <p>Puan aralığı + uzlaşma riski + alternatif okuma + fonlanma olasılığı (%0-95)</p>
-            </div>
-            <div class="gm-feature-item">
-                <div class="gm-feature-icon">🔒</div>
-                <h4>Kimlik Taraması</h4>
-                <p>Kör çağrılar için kimlik ifşa tespiti, kurum/isim/logo algılama</p>
-            </div>
-            <div class="gm-feature-item">
-                <div class="gm-feature-icon">🏷️</div>
-                <h4>Zayıflık Taksonomisi</h4>
-                <p>12 kategorili zayıflık sınıflandırma + çift cezalandırma kontrolü</p>
-            </div>
+            <div class="gm-feature-item"><div class="gm-feature-icon">📡</div><h4>Canlı Çağrı Verisi</h4><p>EC API'den açık çağrıları gerçek zamanlı çeker, Excel'e aktarır</p></div>
+            <div class="gm-feature-item"><div class="gm-feature-icon">🎯</div><h4>AI Çağrı Eşleştirme</h4><p>Teklifinizi en uygun çağrılarla otomatik eşleştirir</p></div>
+            <div class="gm-feature-item"><div class="gm-feature-icon">🧠</div><h4>RAG Bilgi Motoru</h4><p>Kriter bazlı AI-destekli bilgi sentezi</p></div>
+            <div class="gm-feature-item"><div class="gm-feature-icon">📋</div><h4>ESR Simülasyonu</h4><p>Çağrıya özel kriter bazlı hakem değerlendirmesi</p></div>
+            <div class="gm-feature-item"><div class="gm-feature-icon">🎯</div><h4>Akıllı Koçluk</h4><p>Somut düzeltme önerileri, beklenen puan etkisiyle</p></div>
+            <div class="gm-feature-item"><div class="gm-feature-icon">📊</div><h4>Güven & Uzlaşma</h4><p>Puan aralığı + uzlaşma riski + fonlanma olasılığı</p></div>
+            <div class="gm-feature-item"><div class="gm-feature-icon">🔒</div><h4>Kimlik Taraması</h4><p>Kör çağrılar için kimlik ifşa tespiti</p></div>
+            <div class="gm-feature-item"><div class="gm-feature-icon">🏷️</div><h4>Zayıflık Taksonomisi</h4><p>12 kategorili sınıflandırma + çift ceza kontrolü</p></div>
         </div>
         """, unsafe_allow_html=True)
         return
@@ -1572,7 +1209,7 @@ def render_evaluation_page():
     fb = uploaded.read()
     fn = uploaded.name
 
-    # ── PARSE ──
+    # Parse
     with st.spinner("📄 Belge okunuyor ve yapısı analiz ediliyor..."):
         try:
             proposal = parse_proposal(fb, fn)
@@ -1583,30 +1220,13 @@ def render_evaluation_page():
     with st.expander("📄 Belge Özeti", expanded=False):
         dc1, dc2, dc3, dc4 = st.columns(4)
         with dc1:
-            st.markdown(f"""
-            <div class="gm-metric">
-                <div class="gm-metric-value">{proposal.total_pages}</div>
-                <div class="gm-metric-label">Sayfa</div>
-            </div>""", unsafe_allow_html=True)
+            st.markdown(f'<div class="gm-metric"><div class="gm-metric-value">{proposal.total_pages}</div><div class="gm-metric-label">Sayfa</div></div>', unsafe_allow_html=True)
         with dc2:
-            st.markdown(f"""
-            <div class="gm-metric">
-                <div class="gm-metric-value">{proposal.total_words:,}</div>
-                <div class="gm-metric-label">Kelime</div>
-            </div>""", unsafe_allow_html=True)
+            st.markdown(f'<div class="gm-metric"><div class="gm-metric-value">{proposal.total_words:,}</div><div class="gm-metric-label">Kelime</div></div>', unsafe_allow_html=True)
         with dc3:
-            st.markdown(f"""
-            <div class="gm-metric">
-                <div class="gm-metric-value">{len(proposal.sections)}</div>
-                <div class="gm-metric-label">Bölüm</div>
-            </div>""", unsafe_allow_html=True)
+            st.markdown(f'<div class="gm-metric"><div class="gm-metric-value">{len(proposal.sections)}</div><div class="gm-metric-label">Bölüm</div></div>', unsafe_allow_html=True)
         with dc4:
-            st.markdown(f"""
-            <div class="gm-metric">
-                <div class="gm-metric-value">{len(proposal.trl_mentions)}</div>
-                <div class="gm-metric-label">TRL Ref</div>
-            </div>""", unsafe_allow_html=True)
-
+            st.markdown(f'<div class="gm-metric"><div class="gm-metric-value">{len(proposal.trl_mentions)}</div><div class="gm-metric-label">TRL Ref</div></div>', unsafe_allow_html=True)
         for s, d in proposal.sections.items():
             st.write(f"- **{s.value}**: {d.word_count} kelime (sayfa {d.page_start}-{d.page_end})")
         for w in proposal.warnings:
@@ -1631,28 +1251,18 @@ def render_evaluation_page():
             if use_ai_match:
                 try:
                     client = get_llm_client()
-                    matches = ai_match_calls(
-                        proposal.full_text, llm_call_wrapper(client), top_k=3
-                    )
+                    matches = ai_match_calls(proposal.full_text, llm_call_wrapper(client), top_k=5)
                 except Exception:
                     matches = [
-                        {
-                            **c,
-                            "ai_match_score": round(s * 5, 1),
-                            "ai_match_reason": "Keyword match",
-                            "suggested_action_type": c["action_types"][0],
-                        }
-                        for c, s in keyword_match_calls(proposal.full_text, top_k=3)
+                        {**c, "ai_match_score": round(s * 100, 1), "ai_match_reason": "Keyword match",
+                         "suggested_action_type": c["action_types"][0]}
+                        for c, s in keyword_match_calls(proposal.full_text, top_k=5)
                     ]
             else:
                 matches = [
-                    {
-                        **c,
-                        "ai_match_score": round(s * 5, 1),
-                        "ai_match_reason": "Keyword match",
-                        "suggested_action_type": c["action_types"][0],
-                    }
-                    for c, s in keyword_match_calls(proposal.full_text, top_k=3)
+                    {**c, "ai_match_score": round(s * 100, 1), "ai_match_reason": "Keyword match",
+                     "suggested_action_type": c["action_types"][0]}
+                    for c, s in keyword_match_calls(proposal.full_text, top_k=5)
                 ]
             st.session_state["matched_calls"] = matches
 
@@ -1662,18 +1272,14 @@ def render_evaluation_page():
         for i, m in enumerate(matches):
             score = m.get("ai_match_score", 0)
             if score >= 70:
-                match_badge = "gm-match-high"
-                score_icon = "🟢"
+                match_badge, score_icon = "gm-match-high", "🟢"
             elif score >= 40:
-                match_badge = "gm-match-medium"
-                score_icon = "🟡"
+                match_badge, score_icon = "gm-match-medium", "🟡"
             else:
-                match_badge = "gm-match-low"
-                score_icon = "🔴"
+                match_badge, score_icon = "gm-match-low", "🔴"
 
             with st.expander(
-                f"{score_icon} {m['call_id']} — Uyum: {score}/100 | "
-                f"{', '.join(m.get('action_types', []))}",
+                f"{score_icon} {m['call_id']} — Uyum: {score}/100 | {', '.join(m.get('action_types', []))}",
                 expanded=(i == 0),
             ):
                 st.markdown(f"""
@@ -1697,8 +1303,7 @@ def render_evaluation_page():
                     st.markdown(f"**Kapsam:** {m.get('scope', 'N/A')}")
 
                 if st.button(f"✅ Bu çağrıyı kullan", key=f"use_match_{i}"):
-                    call_ctx_text_auto = build_call_eval_context(m)
-                    st.session_state["auto_call_ctx"] = call_ctx_text_auto
+                    st.session_state["auto_call_ctx"] = build_call_eval_context(m)
                     suggested = m.get("suggested_action_type", "")
                     if suggested:
                         try:
@@ -1710,34 +1315,26 @@ def render_evaluation_page():
     else:
         st.info("Eşleşen çağrı bulunamadı. Manuel olarak çağrı bağlamı girebilirsiniz.")
 
-    # ── ELIGIBILITY ──
+    # Eligibility
     with st.spinner("✅ Uygunluk kontrolleri çalıştırılıyor..."):
         elig = run_eligibility_checks(proposal, action)
     render_eligibility(elig)
 
-    # ── BLIND SCAN ──
+    # Blind scan
     if blind:
-        sigs = scan_for_identity_signals(
-            proposal.full_text, proposal.partner_names, proposal.person_names
-        )
+        sigs = scan_for_identity_signals(proposal.full_text, proposal.partner_names, proposal.person_names)
         rpt = generate_deidentification_report(sigs)
         with st.expander(f"🔒 Kimlik Taraması ({len(sigs)} sinyal)", expanded=len(sigs) > 0):
             st.markdown(rpt)
 
-    # ── BUILD CALL CONTEXT (combine all sources) ──
+    # Build call context
     call_ctx_text = ""
-
-    # From auto-matching
     auto_ctx = st.session_state.get("auto_call_ctx", "")
     if auto_ctx:
         call_ctx_text = auto_ctx
-
-    # From live call dashboard
     if has_call and use_call and not call_ctx_text:
         call_context = st.session_state.get("call_context", {})
         call_ctx_text = call_context.get("evaluation_context", "")
-
-    # From manual input
     if manual_ctx:
         call_ctx_text = (call_ctx_text + "\n\n" + manual_ctx) if call_ctx_text else manual_ctx
 
@@ -1754,9 +1351,9 @@ def render_evaluation_page():
     with c_b:
         go = st.button("🔬 Değerlendirmeyi Başlat", type="primary", use_container_width=True)
     with c_i:
-        ctx_note = " + 📡 Çağrı bağlamı" if call_ctx_text else ""
+        ctx_note = " + 📡 Çağrı" if call_ctx_text else ""
         rag_note = " + 🧠 RAG" if use_ai_rag else ""
-        st.info(f"**{action.value}**: {n} kriter{ctx_note}{rag_note} · Tahmini süre: ~{n * 30}-{n * 60}s")
+        st.info(f"**{action.value}**: {n} kriter{ctx_note}{rag_note} · ~{n * 30}-{n * 60}s")
 
     if not go:
         return
@@ -1765,23 +1362,23 @@ def render_evaluation_page():
     kb = HorizonKnowledgeBase()
     ev = Evaluator(client, kb)
     pbar = st.progress(0.0)
-    status = st.empty()
+    status_el = st.empty()
     step = [0]
-    total = n * 3
+    total_steps = n * 3
 
     def on_p(msg):
-        status.markdown(f"⏳ {msg}")
+        status_el.markdown(f"⏳ {msg}")
         step[0] += 1
-        pbar.progress(min(step[0] / total, 1.0))
+        pbar.progress(min(step[0] / total_steps, 1.0))
 
     results = ev.run(proposal, action, call_ctx_text, on_p, use_ai_rag=use_ai_rag)
     pbar.progress(1.0)
-    status.markdown("✅ Değerlendirme tamamlandı!")
+    status_el.markdown("✅ Değerlendirme tamamlandı!")
     time.sleep(0.5)
-    status.empty()
+    status_el.empty()
     pbar.empty()
 
-    # ── DISPLAY RESULTS ──
+    # Display
     st.markdown("---")
     render_overall(results)
 
@@ -1801,7 +1398,7 @@ def render_evaluation_page():
             co = results["coaching"][i] if i < len(results["coaching"]) else {}
             render_criterion(cd, co, show_coach)
 
-    # ── DOWNLOADS ──
+    # Downloads
     st.markdown("""
     <div class="gm-section-header">
         <span class="gm-section-icon">📥</span>
@@ -1810,40 +1407,20 @@ def render_evaluation_page():
     """, unsafe_allow_html=True)
 
     d1, d2, d3 = st.columns(3)
-    elig_dicts = [
-        {"check_name": ch.check_name, "status": ch.status.value, "message": ch.message}
-        for ch in elig.results
-    ]
-
+    elig_dicts = [{"check_name": ch.check_name, "status": ch.status.value, "message": ch.message} for ch in elig.results]
     with d1:
-        st.download_button(
-            "📊 JSON Rapor",
-            json.dumps(results, indent=2, ensure_ascii=False),
-            f"grantmirror_{fn}.json",
-            "application/json",
-            use_container_width=True,
-        )
+        st.download_button("📊 JSON Rapor", json.dumps(results, indent=2, ensure_ascii=False),
+                           f"grantmirror_{fn}.json", "application/json", use_container_width=True)
     with d2:
-        st.download_button(
-            "📋 ESR Rapor (MD)",
-            generate_esr_report(results, elig_dicts),
-            f"grantmirror_{fn}_esr.md",
-            "text/markdown",
-            use_container_width=True,
-        )
+        st.download_button("📋 ESR Rapor (MD)", generate_esr_report(results, elig_dicts),
+                           f"grantmirror_{fn}_esr.md", "text/markdown", use_container_width=True)
     with d3:
-        st.download_button(
-            "🎯 Koçluk Rapor (MD)",
-            generate_coaching_report(results),
-            f"grantmirror_{fn}_coach.md",
-            "text/markdown",
-            use_container_width=True,
-        )
+        st.download_button("🎯 Koçluk Rapor (MD)", generate_coaching_report(results),
+                           f"grantmirror_{fn}_coach.md", "text/markdown", use_container_width=True)
 
-    # ── DEBUG PANEL ──
+    # DEBUG
     with st.expander("🔧 DEBUG Panel"):
         st.markdown("### Sistem Bilgileri")
-
         dcol1, dcol2, dcol3 = st.columns(3)
         with dcol1:
             st.metric("Proposal Uzunluğu", f"{proposal.total_words:,} kelime")
@@ -1857,26 +1434,21 @@ def render_evaluation_page():
 
         st.markdown("### Eşleşen Çağrı")
         if matches:
-            st.json({
-                "top_match": matches[0].get("call_id", "?"),
-                "match_score": matches[0].get("ai_match_score", 0),
-                "action_type": matches[0].get("suggested_action_type", "?"),
-            })
+            st.json({"top_match": matches[0].get("call_id", "?"),
+                      "match_score": matches[0].get("ai_match_score", 0),
+                      "action_type": matches[0].get("suggested_action_type", "?")})
         else:
             st.write("Eşleşme yok")
 
         st.markdown("### Çağrı Bağlamı")
         if call_ctx_text:
-            st.text_area("Context gönderilen", call_ctx_text[:1000], height=150, disabled=True)
+            st.text_area("Context", call_ctx_text[:1000], height=150, disabled=True)
         else:
             st.write("Bağlam yok")
 
         st.markdown("### Bölüm Tespiti")
         for sec_type, sec_data in proposal.sections.items():
-            st.write(
-                f"- **{sec_type.value}**: {sec_data.word_count} kelime, "
-                f"sayfa {sec_data.page_start}-{sec_data.page_end}"
-            )
+            st.write(f"- **{sec_type.value}**: {sec_data.word_count} kelime, sayfa {sec_data.page_start}-{sec_data.page_end}")
 
         st.markdown("### Funding Probability Detay")
         fp_dbg = results.get("funding_probability_pct", 0)
@@ -1888,12 +1460,44 @@ def render_evaluation_page():
 
         st.markdown("### AI Ayarları")
         st.write(f"AI RAG aktif: {use_ai_rag}")
-        st.write(f"AI eşleştirme kullanıldı: {use_ai_match}")
+        st.write(f"AI eşleştirme: {use_ai_match}")
         st.write(f"Model: {MODEL_NAME}")
+        st.write(f"Call DB boyutu: {len(HORIZON_CALLS_DB)} çağrı")
 
-        st.markdown("### Ham Sonuçlar (JSON)")
+        st.markdown("### Ham Sonuçlar")
         st.json(results)
+
+
+# ═══════════════════════════════════════════════════════════
+# MAIN
+# ═══════════════════════════════════════════════════════════
+def main():
+    render_header()
+
+    nav = st.session_state.pop("page_nav", None)
+
+    page = st.sidebar.radio(
+        "📌 Sayfa",
+        ["🔬 Değerlendirme", "📡 Canlı Çağrılar"],
+        index=0 if nav != "eval" else 0,
+        label_visibility="collapsed",
+    )
+
+    with st.sidebar:
+        st.markdown("---")
+        stats = get_call_stats()
+        st.caption(
+            f"📊 DB: {stats['total']} çağrı | "
+            f"🟢 {stats['open']} açık | "
+            f"🟡 {stats['forthcoming']} yaklaşan"
+        )
+
+    if page == "📡 Canlı Çağrılar":
+        render_calls_page()
+    else:
+        render_evaluation_page()
 
 
 if __name__ == "__main__":
     main()
+        
