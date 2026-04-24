@@ -495,6 +495,7 @@ def render_call_dashboard():
             kw = search.lower()
             calls = [c for c in calls if kw in c.get("title", "").lower() or kw in c.get("call_id", "").lower() or kw in " ".join(c.get("keywords", [])).lower() or kw in c.get("scope", "").lower()]
         st.session_state.call_cache.set(cache_key, (calls, src_stats))
+        st.session_state["last_fetch_stats"] = src_stats
 
     if not calls:
         st.info("Çağrı bulunamadı. Filtreleri değiştirin.")
