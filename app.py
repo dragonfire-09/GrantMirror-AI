@@ -1715,17 +1715,33 @@ def render_evaluation_page():
 # ═══════════════════════════════════════════════════════════
 # MAIN
 # ═══════════════════════════════════════════════════════════
-pages = ["🔬 Değerlendirme", "📡 Canlı Çağrılar", "📰 Haberler"]
-default_page = st.session_state.get("nav", "🔬 Değerlendirme")
+def main():
+    render_header()
+    inject_modern_css()
 
-page = st.sidebar.radio(
-    "📌",
-    pages,
-    index=pages.index(default_page) if default_page in pages else 0,
-    label_visibility="collapsed",
-   )
+    pages = ["🔬 Değerlendirme", "📡 Canlı Çağrılar", "📰 Haberler"]
+    default_page = st.session_state.get("nav", "🔬 Değerlendirme")
 
-   st.session_state["nav"] = page
+    page = st.sidebar.radio(
+        "📌",
+        pages,
+        index=pages.index(default_page) if default_page in pages else 0,
+        label_visibility="collapsed",
+    )
+
+    st.session_state["nav"] = page
+
+    with st.sidebar:
+        st.divider()
+
+    if page == "🔬 Değerlendirme":
+        render_evaluation_page()
+
+    elif page == "📡 Canlı Çağrılar":
+        render_calls_page()
+
+    elif page == "📰 Haberler":
+        render_news_page()
     
     with st.sidebar:
         st.divider()
