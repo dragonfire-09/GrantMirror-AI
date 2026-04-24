@@ -190,6 +190,99 @@ def inject_modern_css():
             font-size: 0.78rem;
             font-weight: 800;
         }
+        /* ===== FEATURE GRID ===== */
+
+.gm-feature-grid {
+    display: grid;
+    grid-template-columns: repeat(4, minmax(0, 1fr));
+    gap: 20px;
+    margin-top: 1.5rem;
+}
+
+/* ===== FEATURE CARD ===== */
+
+.gm-feature-card {
+    background: rgba(255, 255, 255, 0.92);
+    border: 1px solid #eaecf0;
+    border-radius: 24px;
+    padding: 1.3rem;
+    min-height: 190px;
+    box-shadow: 0 12px 30px rgba(16,24,40,0.06);
+    transition: all 0.25s ease;
+    backdrop-filter: blur(6px);
+}
+
+.gm-feature-card:hover {
+    transform: translateY(-6px) scale(1.01);
+    box-shadow: 0 22px 48px rgba(16,24,40,0.15);
+    border-color: #84adff;
+}
+
+/* ===== TOP AREA ===== */
+
+.gm-feature-top {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    margin-bottom: 1rem;
+}
+
+/* ===== ICON ===== */
+
+.gm-feature-icon {
+    width: 52px;
+    height: 52px;
+    border-radius: 18px;
+    background: linear-gradient(135deg, #eef4ff, #dbeafe);
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    font-size: 1.6rem;
+    box-shadow: inset 0 1px 2px rgba(255,255,255,0.5);
+}
+
+/* ===== TAG ===== */
+
+.gm-feature-tag {
+    font-size: 0.7rem;
+    font-weight: 800;
+    color: #175cd3;
+    background: #eff4ff;
+    padding: 0.3rem 0.65rem;
+    border-radius: 999px;
+    letter-spacing: 0.03em;
+}
+
+/* ===== TITLE ===== */
+
+.gm-feature-title {
+    font-size: 1.1rem;
+    font-weight: 900;
+    color: #101828;
+    margin-bottom: 0.4rem;
+}
+
+/* ===== DESCRIPTION ===== */
+
+.gm-feature-desc {
+    font-size: 0.9rem;
+    color: #667085;
+    line-height: 1.5;
+}
+
+/* ===== RESPONSIVE ===== */
+
+@media (max-width: 1100px) {
+    .gm-feature-grid {
+        grid-template-columns: repeat(2, minmax(0, 1fr));
+    }
+}
+
+@media (max-width: 700px) {
+    .gm-feature-grid {
+        grid-template-columns: 1fr;
+    }
+}
 
         /* ─────────────────────────────
            BUTTONS
