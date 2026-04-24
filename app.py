@@ -14,14 +14,22 @@ st.set_page_config(
 
 
 st.title("🧠 Horizon Evaluator AI")
-st.caption("AI-based Horizon Europe Proposal Pre-Evaluation Platform")
+st.caption("Multi-reviewer Horizon Europe proposal pre-evaluation platform")
 
 
 with st.sidebar:
     st.header("Call Information")
 
-    call_id = st.text_input("Call ID", placeholder="HORIZON-CL6-2025-...")
-    topic_id = st.text_input("Topic ID", placeholder="HORIZON-CL6-2025-...")
+    call_id = st.text_input(
+        "Call ID",
+        placeholder="Example: HORIZON-CL6-2025-..."
+    )
+
+    topic_id = st.text_input(
+        "Topic ID",
+        placeholder="Example: HORIZON-CL6-2025-..."
+    )
+
     action_type = st.selectbox(
         "Type of Action",
         ["RIA", "IA", "CSA", "MSCA", "EIC", "ERC", "Other"]
@@ -29,12 +37,14 @@ with st.sidebar:
 
     expected_outcomes = st.text_area(
         "Expected Outcomes",
-        placeholder="Paste the expected outcomes from the call text..."
+        placeholder="Paste expected outcomes from the call text...",
+        height=140
     )
 
     scope = st.text_area(
         "Scope",
-        placeholder="Paste the scope section from the call text..."
+        placeholder="Paste scope section from the call text...",
+        height=180
     )
 
     st.divider()
@@ -45,16 +55,33 @@ with st.sidebar:
     )
 
 
-if uploaded_file:
-    st.success(f"Uploaded file: {uploaded_file.name}")
+if uploaded_file is None:
+    st.info("Upload a Horizon Europe proposal PDF or DOCX file to start.")
+    st.stop()
 
+
+st.success(f"Uploaded file: {uploaded_file.name}")
+
+
+try:
     with st.spinner("Extracting proposal text..."):
         proposal_text = extract_text(uploaded_file)
 
-    with st.expander("Preview extracted text"):
-        st.text_area("Extracted Text", proposal_text[:5000], height=300)
+except Exception as e:
+    st.error("Could not extract text from the uploaded file.")
+    st.write(str(e))
+    st.stop()
 
-    call_info = f"""
+
+with st.expander("Preview extracted proposal text"):
+    st.text_area(
+        "Extracted Text",
+        proposal_text[:7000],
+        height=300
+    )
+
+
+call_info = f"""
 Call ID: {call_id}
 Topic ID: {topic_id}
 Type of Action: {action_type}
@@ -66,105 +93,157 @@ Scope:
 {scope}
 """
 
-    if st.button("🚀 Evaluate Proposal", type="primary"):
-        with st.spinner("AI evaluator is reviewing the proposal..."):
-            result = evaluate_proposal(proposal_text, call_info)
 
-        if "error" in result:
-            st.error(result["error"])
-            st.text(result["raw_response"])
-        else:
-            st.subheader("Evaluation Dashboard")
+if st.button("🚀 Run Multi-Reviewer Evaluation", type="primary"):
+    with st.spinner("Three AI evaluators are reviewing the proposal..."):
+        result = evaluate_proposal(proposal_text, call_info)
 
-            excellence_score = result["excellence"]["score"]
-            impact_score = result["impact"]["score"]
-            implementation_score = result["implementation"]["score"]
-            total_score = result["total_score"]
+    if "error" in result:
+        st.error(result["error"])
+        st.write(result.get("details", ""))
+        st.stop()
 
-            col1, col2, col3, col4 = st.columns(4)
+    consensus = result["consensus"]
+    reviews = result["reviews"]
+    scores = consensus["consensus_scores"]
 
-            col1.metric("Excellence", f"{excellence_score}/5")
-            col2.metric("Impact", f"{impact_score}/5")
-            col3.metric("Implementation", f"{implementation_score}/5")
-            col4.metric("Total Score", f"{total_score}/15")
+    st.divider()
+    st.subheader("Consensus Evaluation Dashboard")
 
-            fig = go.Figure()
+    col1, col2, col3, col4 = st.columns(4)
 
-            fig.add_trace(go.Scatterpolar(
-                r=[excellence_score, impact_score, implementation_score],
-                theta=["Excellence", "Impact", "Implementation"],
-                fill="toself",
-                name="Proposal Score"
-            ))
+    col1.metric("Excellence", f"{scores['excellence']}/5")
+    col2.metric("Impact", f"{scores['impact']}/5")
+    col3.metric("Implementation", f"{scores['implementation']}/5")
+    col4.metric("Consensus Total", f"{scores['total']}/15")
 
-            fig.update_layout(
-                polar=dict(
-                    radialaxis=dict(
-                        visible=True,
-                        range=[0, 5]
-                    )
-                ),
-                showlegend=False
+    col5, col6, col7 = st.columns(3)
+
+    col5.metric(
+        "Funding Probability",
+        f"{consensus['funding_probability']}%"
+    )
+
+    col6.metric(
+        "Confidence",
+        f"{consensus['confidence']['confidence_score']}%"
+    )
+
+    col7.metric(
+        "Agreement Level",
+        consensus["confidence"]["confidence_level"]
+    )
+
+    st.warning(consensus["threshold_risk"])
+
+    fig = go.Figure()
+
+    fig.add_trace(
+        go.Scatterpolar(
+            r=[
+                scores["excellence"],
+                scores["impact"],
+                scores["implementation"],
+            ],
+            theta=[
+                "Excellence",
+                "Impact",
+                "Implementation",
+            ],
+            fill="toself",
+            name="Consensus Score",
+        )
+    )
+
+    fig.update_layout(
+        polar=dict(
+            radialaxis=dict(
+                visible=True,
+                range=[0, 5],
             )
+        ),
+        showlegend=False,
+    )
 
-            st.plotly_chart(fig, use_container_width=True)
+    st.plotly_chart(fig, use_container_width=True)
 
-            st.warning(f"Threshold Risk: {result['threshold_risk']}")
+    st.subheader("Reviewer Score Comparison")
 
-            st.subheader("Likely ESR Summary")
-            st.write(result["likely_esr_summary"])
+    reviewer_df = pd.DataFrame(consensus["reviewer_scores"])
+    st.dataframe(reviewer_df, use_container_width=True)
 
-            criteria = {
-                "Excellence": result["excellence"],
-                "Impact": result["impact"],
-                "Implementation": result["implementation"],
-            }
+    st.subheader("Priority Improvement Actions")
 
-            for criterion_name, data in criteria.items():
-                st.divider()
-                st.header(criterion_name)
+    if consensus["priority_actions"]:
+        for index, action in enumerate(consensus["priority_actions"], start=1):
+            st.write(f"{index}. {action}")
+    else:
+        st.info("No priority actions returned.")
 
-                st.subheader("Strengths")
-                for item in data["strengths"]:
-                    st.success(item)
+    st.divider()
+    st.header("Detailed Evaluator Reports")
 
-                st.subheader("Weaknesses")
-                for item in data["weaknesses"]:
-                    st.error(item)
+    for review in reviews:
+        with st.expander(review["reviewer"], expanded=False):
+            st.metric("Total Score", f"{review['total_score']}/15")
 
-                st.subheader("Critical Evaluator Comments")
-                for item in data["critical_comments"]:
+            for section in ["excellence", "impact", "implementation"]:
+                section_data = review[section]
+
+                st.subheader(section.capitalize())
+                st.write(f"Score: {section_data['score']}/5")
+
+                st.markdown("**Strengths**")
+                strengths = section_data.get("strengths", [])
+                if strengths:
+                    for item in strengths:
+                        st.success(item)
+                else:
+                    st.write("No strengths listed.")
+
+                st.markdown("**Weaknesses**")
+                weaknesses = section_data.get("weaknesses", [])
+                if weaknesses:
+                    for item in weaknesses:
+                        st.error(item)
+                else:
+                    st.write("No weaknesses listed.")
+
+                st.markdown("**Critical Comments**")
+                critical_comments = section_data.get("critical_comments", [])
+                if critical_comments:
+                    for item in critical_comments:
+                        st.warning(item)
+                else:
+                    st.write("No critical comments listed.")
+
+                st.markdown("**Recommendations**")
+                recommendations = section_data.get("recommendations", [])
+                if recommendations:
+                    for item in recommendations:
+                        st.info(item)
+                else:
+                    st.write("No recommendations listed.")
+
+            st.markdown("**Overall Comment**")
+            st.write(review.get("overall_comment", ""))
+
+            st.markdown("**Call Match Assessment**")
+            call_match = review.get("call_match_assessment", {})
+            st.write(f"Alignment Score: {call_match.get('alignment_score', 'N/A')}/5")
+            st.write(f"In-Scope Risk: {call_match.get('in_scope_risk', 'N/A')}")
+
+            missing_requirements = call_match.get("missing_call_requirements", [])
+            if missing_requirements:
+                st.markdown("Missing Call Requirements:")
+                for item in missing_requirements:
                     st.warning(item)
 
-                st.subheader("Recommendations")
-                for item in data["recommendations"]:
-                    st.info(item)
+    csv = reviewer_df.to_csv(index=False).encode("utf-8")
 
-            st.divider()
-            st.header("Priority Actions")
-
-            for index, action in enumerate(result["priority_actions"], start=1):
-                st.write(f"{index}. {action}")
-
-            report_df = pd.DataFrame({
-                "Criterion": ["Excellence", "Impact", "Implementation", "Total"],
-                "Score": [
-                    excellence_score,
-                    impact_score,
-                    implementation_score,
-                    total_score
-                ],
-                "Maximum": [5, 5, 5, 15]
-            })
-
-            csv = report_df.to_csv(index=False).encode("utf-8")
-
-            st.download_button(
-                label="Download Score Summary CSV",
-                data=csv,
-                file_name="horizon_evaluation_summary.csv",
-                mime="text/csv"
-            )
-
-else:
-    st.info("Upload a Horizon Europe proposal PDF or DOCX file to start.")
+    st.download_button(
+        label="Download Reviewer Scores CSV",
+        data=csv,
+        file_name="multi_reviewer_scores.csv",
+        mime="text/csv",
+    )
