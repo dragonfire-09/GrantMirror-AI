@@ -931,7 +931,7 @@ for i, call in enumerate(calls):
     source = call.get("source", "N/A")
     url = call.get("url", "")
     
-        with st.container():
+       with st.container():
             st.markdown(
                 f"""
                 <div style="
