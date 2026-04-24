@@ -752,6 +752,25 @@ def render_call_dashboard():
         st.session_state.call_cache.set(cache_key, (calls, src_stats))
         st.session_state["last_fetch_stats"] = src_stats
 
+    # EC API Debug
+    ec_debug = src_stats.get("ec_debug", {})
+    if ec_debug:
+        with st.expander("🔧 EC API Debug"):
+            st.json(ec_debug)
+            if ec_debug.get("attempts"):
+                for att in ec_debug["attempts"]:
+                    status_icon = "✅" if att.get("total_results", 0) > 0 else "❌"
+                    st.markdown(
+                        f"{status_icon} **{att.get('strategy', '?')}** — "
+                        f"HTTP {att.get('status_code', '?')} — "
+                        f"Sonuç: {att.get('total_results', 0)} — "
+                        f"Dönen: {att.get('returned', 0)}"
+                    )
+                    if att.get("error"):
+                        st.error(att["error"][:200])
+                    if att.get("url"):
+                        st.caption(att["url"][:200])
+
     if not calls:
         st.info("Çağrı bulunamadı. Filtreleri değiştirin.")
         return None
