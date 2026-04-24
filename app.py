@@ -1385,15 +1385,22 @@ def render_feature_dashboard():
             st.rerun()
     
 def render_evaluation_page():
+    # ─────────────────────────────
+    # SIDEBAR SETTINGS
+    # ─────────────────────────────
     with st.sidebar:
         st.markdown("## ⚙️ Ayarlar")
+
         has_call = "selected_call" in st.session_state
+
         if has_call:
             cd = st.session_state["selected_call"]
             dat = detect_action_type_from_call(cd)
             st.success(f"📡 {clean_html(cd.get('call_id', '?'))}")
+
             action = get_action_type_from_string(dat)
             use_call = st.checkbox("Çağrı bağlamını kullan", value=True)
+
         else:
             labels = {
                 ActionType.RIA: "🔬 RIA",
@@ -1404,85 +1411,115 @@ def render_evaluation_page():
                 ActionType.EIC_ACCELERATOR: "📈 EIC Accelerator",
                 ActionType.ERC_STG: "⭐ ERC StG",
             }
+
             action = st.selectbox(
-                "Aksiyon Türü", list(labels.keys()),
+                "Aksiyon Türü",
+                list(labels.keys()),
                 format_func=lambda x: labels[x],
             )
+
             use_call = False
 
         aa = st.session_state.get("auto_action_type")
+
         if aa and not has_call:
             action = aa
             st.info(f"🎯 AI: {action.value}")
 
         cfg = ACTION_TYPE_CONFIGS[action]
+
         with st.expander("ℹ️ Kriterler"):
             for cr in cfg.criteria:
                 st.markdown(
-                    f"**{cr.name}** (w:{cr.weight}, t:{cr.threshold}/{cr.max_score})"
+                    f"**{cr.name}** "
+                    f"(w:{cr.weight}, t:{cr.threshold}/{cr.max_score})"
                 )
 
         st.divider()
+
         mode = st.radio(
-            "Çıktı", ["both", "esr_only", "coaching_only"],
+            "Çıktı",
+            ["both", "esr_only", "coaching_only"],
             format_func=lambda x: {
                 "both": "📋+🎯 Tam",
                 "esr_only": "📋 ESR",
                 "coaching_only": "🎯 Koçluk",
             }[x],
         )
+
         st.divider()
+
         manual_ctx = st.text_area(
-            "Ek Bağlam", height=80, placeholder="Work Programme scope...",
+            "Ek Bağlam",
+            height=80,
+            placeholder="Work Programme scope...",
         )
-        blind = st.checkbox("🔒 Kimlik taraması", value=cfg.blind_evaluation)
+
+        blind = st.checkbox(
+            "🔒 Kimlik taraması",
+            value=cfg.blind_evaluation,
+        )
+
         st.divider()
+
         st.markdown("### 🧠 AI Ayarları")
-        use_ai_rag = st.checkbox("RAG zenginleştirme", value=True)
+
+        use_ai_rag = st.checkbox(
+            "RAG zenginleştirme",
+            value=True,
+        )
+
         st.caption("⚠️ Resmî EC değerlendirmesinin yerini almaz.")
 
-    # MAIN
-        st.markdown(
-    """
-    <div class="gm-onboarding">
-        <div class="gm-onboarding-left">
-            <div class="gm-eyebrow">AI Proposal Pre-Screening</div>
+    # ─────────────────────────────
+    # MAIN UPLOAD AREA
+    # ─────────────────────────────
+    st.markdown(
+        """
+        <div class="gm-onboarding">
+            <div class="gm-onboarding-left">
+                <div class="gm-eyebrow">AI Proposal Pre-Screening</div>
 
-            <h2>📤 Teklifinizi yükleyin, hakem gibi analiz edelim</h2>
+                <h2>📤 Teklifinizi yükleyin, hakem gibi analiz edelim</h2>
 
-            <p>
-                Horizon Europe Part B dokümanınızı yükleyin. Sistem;
-                çağrı uyumu, ESR değerlendirmesi ve fonlanma analizi üretir.
-            </p>
+                <p>
+                    Horizon Europe Part B dokümanınızı yükleyin. Sistem;
+                    çağrı uyumu, ESR değerlendirmesi ve fonlanma analizi üretir.
+                </p>
 
-            <div class="gm-onboarding-badges">
-                <span>PDF</span>
-                <span>DOCX</span>
-                <span>ESR Simulation</span>
-                <span>AI Matching</span>
+                <div class="gm-onboarding-badges">
+                    <span>PDF</span>
+                    <span>DOCX</span>
+                    <span>ESR Simulation</span>
+                    <span>AI Matching</span>
+                </div>
+            </div>
+
+            <div class="gm-onboarding-steps">
+                <div class="gm-step"><b>1</b><span>Proposal yükle</span></div>
+                <div class="gm-step"><b>2</b><span>AI analiz etsin</span></div>
+                <div class="gm-step"><b>3</b><span>Raporu al</span></div>
             </div>
         </div>
+        """,
+        unsafe_allow_html=True,
+    )
 
-        <div class="gm-onboarding-steps">
-            <div class="gm-step"><b>1</b><span>Proposal yükle</span></div>
-            <div class="gm-step"><b>2</b><span>AI analiz etsin</span></div>
-            <div class="gm-step"><b>3</b><span>Raporu al</span></div>
-        </div>
-    </div>
-    """,
-    unsafe_allow_html=True,
-)
+    uploaded = st.file_uploader(
+        "📄 Dosyanızı buraya bırakın",
+        type=["pdf", "docx", "doc"],
+    )
 
-uploaded = st.file_uploader(
-    "📄 Dosyanızı buraya bırakın",
-    type=["pdf", "docx", "doc"],
-)
+    if not uploaded:
+        render_feature_dashboard()
+        return
 
-if not uploaded:
-   render_feature_dashboard()
-   return
+    fb = uploaded.read()
+    fn = uploaded.name
 
-fb, fn = uploaded.read(), uploaded.name
+    # ─────────────────────────────
+    # DOCUMENT PARSING
+    # ─────────────────────────────
     with st.spinner("📄 Belge okunuyor..."):
         try:
             proposal = parse_proposal(fb, fn)
@@ -1490,20 +1527,29 @@ fb, fn = uploaded.read(), uploaded.name
             st.error(f"❌ Belge hatası: {e}")
             return
 
+    st.success(f"✅ Belge yüklendi: {fn}")
+
     with st.expander("📄 Belge Özeti", expanded=False):
         d1, d2, d3, d4 = st.columns(4)
+
         with d1:
             st.metric("Sayfa", proposal.total_pages)
+
         with d2:
             st.metric("Kelime", f"{proposal.total_words:,}")
+
         with d3:
             st.metric("Bölüm", len(proposal.sections))
+
         with d4:
             st.metric("TRL", len(proposal.trl_mentions))
+
         for s, d in proposal.sections.items():
             st.write(f"- **{s.value}**: {d.word_count} kelime")
+
         for w in proposal.warnings:
             st.warning(w)
+
 
     # AI CALL MATCHING
     st.markdown("### 🎯 Otomatik Çağrı Eşleştirme")
