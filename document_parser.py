@@ -52,20 +52,33 @@ class ParsedProposal:
 
 SECTION_PATTERNS = {
     SectionType.EXCELLENCE: [
-        r"(?i)^[\d\.]*\s*(?:section\s*)?1[\.\s]+excellence",
-        r"(?i)^1\.\s+excellence",
-        r"(?i)^[\d\.]*\s*excellence",
-    ],
-    SectionType.IMPACT: [
-        r"(?i)^[\d\.]*\s*(?:section\s*)?2[\.\s]+impact",
-        r"(?i)^2\.\s+impact",
-        r"(?i)^[\d\.]*\s*impact",
-    ],
-    SectionType.IMPLEMENTATION: [
-        r"(?i)^[\d\.]*\s*(?:section\s*)?3[\.\s]+(?:quality|implementation)",
-        r"(?i)^3\.\s+(?:quality|implementation)",
-        r"(?i)quality\s+and\s+efficiency\s+of\s+the\s+implementation",
-    ],
+    r"(?i)^[\d\.]*\s*(?:section\s*)?1[\.\s]+excellence",
+    r"(?i)^1\.\s+excellence",
+    r"(?i)^[\d\.]*\s*excellence",
+    r"(?i)scientific\s+excellence",
+    r"(?i)quality\s+of\s+the\s+objectives",
+    r"(?i)objectives\s+and\s+ambition",
+],
+
+SectionType.IMPACT: [
+    r"(?i)^[\d\.]*\s*(?:section\s*)?2[\.\s]+impact",
+    r"(?i)^2\.\s+impact",
+    r"(?i)^[\d\.]*\s*impact",
+    r"(?i)expected\s+impact",
+    r"(?i)pathway\s+to\s+impact",
+    r"(?i)measures\s+to\s+maximise\s+impact",
+],
+
+SectionType.IMPLEMENTATION: [
+    r"(?i)^[\d\.]*\s*(?:section\s*)?3[\.\s]+(?:quality|implementation)",
+    r"(?i)^3\.\s+(?:quality|implementation)",
+    r"(?i)quality\s+and\s+efficiency\s+of\s+the\s+implementation",
+    r"(?i)implementation",
+    r"(?i)work\s+plan",
+    r"(?i)work\s+packages?",
+    r"(?i)governance",
+    r"(?i)management\s+structure",
+],
     SectionType.OPEN_SCIENCE: [
         r"(?i)open\s+science\s+practices",
         r"(?i)open\s+science",
