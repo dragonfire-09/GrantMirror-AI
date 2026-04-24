@@ -892,7 +892,7 @@ def render_call_dashboard():
             f"DB:{src_stats.get('local_db', 0)}",
         )
 
-    try:
+       try:
         excel_bytes = calls_to_excel_bytes(calls)
 
         st.download_button(
@@ -902,74 +902,67 @@ def render_call_dashboard():
             mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
             use_container_width=True,
         )
-        
-        # ─── AI CALL MATCHING ───
-st.markdown("### 🤖 AI ile En Uygun Çağrıları Bul")
-
-proposal_for_ranking = st.text_area(
-    "Proje özeti gir",
-    placeholder="Projenin amacını, teknolojisini, hedefini yaz...",
-    height=120,
-)
-
-if st.button("🎯 En Uygun Çağrıları Bul", use_container_width=True):
-
-    if not proposal_for_ranking.strip():
-        st.warning("Önce proje özeti gir")
-    else:
-        with st.spinner("AI analiz yapıyor..."):
-
-            ranked_calls = rank_calls_with_ai(
-                proposal_text=proposal_for_ranking,
-                calls=calls,
-                llm_call=evaluator._call_llm,
-                top_k=10,
-            )
-
-        st.session_state["ranked_calls"] = ranked_calls
-
-
-ranked_calls = st.session_state.get("ranked_calls", [])
-
-if ranked_calls:
-    st.success(f"{len(ranked_calls)} en uygun çağrı bulundu")
-
-    for i, call in enumerate(ranked_calls, 1):
-
-        st.markdown(
-            f"""
-            <div style="
-                border:1px solid #d0d5dd;
-                border-radius:16px;
-                padding:16px;
-                margin-bottom:12px;
-                background:#ffffff;
-            ">
-                <div style="font-size:0.85rem;color:#667085;">
-                    #{i} · 🎯 {call.get('ai_match_score', 0)}/100 · {call.get('ai_fit_level', '')}
-                </div>
-
-                <div style="font-size:1.1rem;font-weight:700;color:#101828;">
-                    {call.get('call_id', '')}
-                </div>
-
-                <div>{call.get('title', '')}</div>
-
-                <div style="font-size:0.85rem;color:#667085;margin-top:6px;">
-                    📅 {call.get('deadline', '')} · 🛰️ {call.get('source', '')}
-                </div>
-
-                <div style="margin-top:8px;">
-                    <b>Neden uygun:</b> {call.get('ai_match_reason', '')}
-                </div>
-            </div>
-            """,
-            unsafe_allow_html=True,
-        )
 
     except Exception as e:
         st.warning(f"Excel export hazırlanamadı: {e}")
 
+    # ─── AI CALL MATCHING ───
+    st.markdown("### 🤖 AI ile En Uygun Çağrıları Bul")
+
+    proposal_for_ranking = st.text_area(
+        "Proje özeti gir",
+        placeholder="Projenin amacını, teknolojisini, hedefini yaz...",
+        height=120,
+    )
+
+    if st.button("🎯 En Uygun Çağrıları Bul", use_container_width=True):
+        if not proposal_for_ranking.strip():
+            st.warning("Önce proje özeti gir")
+        else:
+            with st.spinner("AI analiz yapıyor..."):
+                ranked_calls = rank_calls_with_ai(
+                    proposal_text=proposal_for_ranking,
+                    calls=calls,
+                    llm_call=llm_call_wrapper(get_llm_client()),
+                    top_k=10,
+                )
+
+            st.session_state["ranked_calls"] = ranked_calls
+
+    ranked_calls = st.session_state.get("ranked_calls", [])
+
+    if ranked_calls:
+        st.success(f"{len(ranked_calls)} en uygun çağrı bulundu")
+
+        for i, call in enumerate(ranked_calls, 1):
+            st.markdown(
+                f"""
+                <div style="
+                    border:1px solid #d0d5dd;
+                    border-radius:16px;
+                    padding:16px;
+                    margin-bottom:12px;
+                    background:#ffffff;
+                ">
+                    <div style="font-size:0.85rem;color:#667085;">
+                        #{i} · 🎯 {call.get('ai_match_score', 0)}/100 · {call.get('ai_fit_level', '')}
+                    </div>
+                    <div style="font-size:1.1rem;font-weight:700;color:#101828;">
+                        {call.get('call_id', '')}
+                    </div>
+                    <div>{call.get('title', '')}</div>
+                    <div style="font-size:0.85rem;color:#667085;margin-top:6px;">
+                        📅 {call.get('deadline', '')} · 🛰️ {call.get('source', '')}
+                    </div>
+                    <div style="margin-top:8px;">
+                        <b>Neden uygun:</b> {call.get('ai_match_reason', '')}
+                    </div>
+                </div>
+                """,
+                unsafe_allow_html=True,
+            )
+        
+        
     selected_call = None
 
     # Pagination
