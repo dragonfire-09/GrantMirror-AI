@@ -312,6 +312,83 @@ def inject_modern_css():
             padding: 1.2rem;
             background: #ffffff;
         }
+/* ─────────────────────────────
+   FEATURE CARDS (HOVER + GLOW)
+───────────────────────────── */
+
+.gm-feature-card-pro {
+    position: relative;
+    overflow: hidden;
+    background: rgba(255,255,255,0.92);
+    border: 1px solid #eaecf0;
+    border-radius: 24px;
+    padding: 20px;
+    min-height: 170px;
+    box-shadow: 0 12px 28px rgba(16,24,40,0.08);
+    transition: all 0.25s ease;
+    backdrop-filter: blur(6px);
+}
+
+.gm-feature-card-pro:hover {
+    transform: translateY(-6px) scale(1.01);
+    border-color: #175cd3;
+    box-shadow:
+        0 22px 48px rgba(16,24,40,0.18),
+        0 0 0 6px rgba(23,92,211,0.08);
+}
+
+/* glow effect */
+.gm-feature-card-pro::before {
+    content: "";
+    position: absolute;
+    inset: -60px;
+    background: radial-gradient(circle, rgba(23,92,211,0.25), transparent 70%);
+    opacity: 0;
+    transition: opacity 0.3s ease;
+}
+
+.gm-feature-card-pro:hover::before {
+    opacity: 1;
+}
+
+/* icon */
+.gm-feature-icon-pro {
+    width: 54px;
+    height: 54px;
+    border-radius: 18px;
+    background: linear-gradient(135deg, #eef4ff, #dbeafe);
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    font-size: 26px;
+}
+
+/* tag */
+.gm-feature-tag-pro {
+    font-size: 11px;
+    font-weight: 800;
+    color: #175cd3;
+    background: #eff4ff;
+    padding: 6px 10px;
+    border-radius: 999px;
+}
+
+/* title */
+.gm-feature-title-pro {
+    font-size: 17px;
+    font-weight: 900;
+    color: #101828;
+    margin-top: 8px;
+}
+
+/* desc */
+.gm-feature-desc-pro {
+    font-size: 14px;
+    color: #667085;
+    margin-top: 4px;
+}
+
+        
 
         /* ─────────────────────────────
            METRICS
