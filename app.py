@@ -682,6 +682,7 @@ def render_call_dashboard():
             "Forthcoming": "Yaklaşan",
         }.get(x, x),
     )
+    
     with col3:
         dest_options = [""] + sorted(
             set(
