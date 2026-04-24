@@ -214,6 +214,7 @@ class Evaluator:
     def __init__(self, client, kb):
         self.client = client
         self.kb = kb
+        self.llm_fn = llm_call_wrapper(client)
 
     def _section_text(self, proposal, criterion):
         mapping = {
@@ -235,7 +236,16 @@ class Evaluator:
     def _cross_ctx(self, proposal):
         return "\n".join(f"[{s.value}]: {d.content[:400]}" for s, d in proposal.sections.items() if d.word_count > 50)
 
-    def run(self, proposal, action_type, call_ctx="", on_progress=None):
+    def _get_rag_context(self, criterion, action_type, section_text, use_ai_rag=True):
+        """Get RAG-enhanced knowledge context."""
+        if use_ai_rag:
+            try:
+                return ai_enhanced_retrieval(criterion, action_type, section_text, self.llm_fn)
+            except Exception:
+                pass
+        return rag_get_context(criterion, action_type, section_text[:500])
+
+    def run(self, proposal, action_type, call_ctx="", on_progress=None, use_ai_rag=True):
         cfg = ACTION_TYPE_CONFIGS[action_type]
         results = {"action_type": action_type.value, "criteria": [], "coaching": []}
         total_w = 0.0
@@ -245,9 +255,15 @@ class Evaluator:
             if on_progress:
                 on_progress(f"📝 {i + 1}/{len(cfg.criteria)}: {cc.name}...")
 
+            # SECTION-AWARE: get correct section text
             sec = self._section_text(proposal, cc.name)
-            kb_ctx = self.kb.get_criterion_context(cc.name, action_type.value)
             cross = self._cross_ctx(proposal)
+
+            # RAG-ENHANCED: get AI-synthesized knowledge context
+            if on_progress:
+                on_progress(f"🧠 {cc.name} bilgi tabanı hazırlanıyor...")
+            kb_ctx = self._get_rag_context(cc.name, action_type.value, sec, use_ai_rag)
+
             prompt = build_eval_prompt(cc, sec, cross, kb_ctx, action_type.value, call_ctx)
             raw = call_llm(self.client, SYS_ESR, prompt)
 
@@ -293,12 +309,10 @@ class Evaluator:
         results["total_threshold"] = cfg.total_threshold
         results["total_threshold_met"] = all_met and total_w >= cfg.total_threshold
         results["all_criteria_met"] = all_met
-        results["funding_probability"] = (
-            "very_low" if not results["total_threshold_met"]
-            else "high" if total_w >= cfg.total_max * 0.85
-            else "medium" if total_w >= cfg.total_max * 0.75
-            else "low" if total_w >= cfg.total_threshold else "very_low"
-        )
+
+        # ENHANCED funding probability
+        results["funding_probability"] = _calc_funding_probability(total_w, cfg.total_max, cfg.total_threshold, all_met)
+        results["funding_probability_pct"] = _calc_funding_pct(total_w, cfg.total_max, cfg.total_threshold, all_met)
 
         # Cross-cutting weakness detection
         cats = []
