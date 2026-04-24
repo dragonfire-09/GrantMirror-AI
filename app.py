@@ -905,33 +905,44 @@ def render_call_dashboard():
     except Exception as e:
         st.warning(f"Excel export hazırlanamadı: {e}")
 
-    selected_call = None
-    
-# Pagination
-page = st.number_input("Sayfa", 1, (len(calls) // 6) + 1, 1)
+        selected_call = None
 
-start = (page - 1) * 6
-end = start + 6
+    # Pagination
+    items_per_page = 6
+    total_pages = max(1, (len(calls) + items_per_page - 1) // items_per_page)
 
-calls = calls[start:end]
+    page = st.number_input(
+        "Sayfa",
+        min_value=1,
+        max_value=total_pages,
+        value=1,
+        step=1,
+    )
 
-for i, call in enumerate(calls):
-    status = call.get("status", "Unknown")
+    start = (page - 1) * items_per_page
+    end = start + items_per_page
 
-    status_icon = {
-        "Open": "🟢",
-        "Forthcoming": "🟡",
-        "Closed": "🔴",
-    }.get(status, "⚪")
+    paged_calls = calls[start:end]
 
-    call_id = call.get("call_id", "N/A")
-    title = call.get("title", "N/A")
-    deadline = call.get("deadline", "N/A")
-    action_types = ", ".join(call.get("action_types", [])) or "N/A"
-    source = call.get("source", "N/A")
-    url = call.get("url", "")
-    
-    with st.container():
+    st.caption(f"Sayfa {page}/{total_pages} · Toplam {len(calls)} çağrı")
+
+    for i, call in enumerate(paged_calls, start=start):
+        status = call.get("status", "Unknown")
+
+        status_icon = {
+            "Open": "🟢",
+            "Forthcoming": "🟡",
+            "Closed": "🔴",
+        }.get(status, "⚪")
+
+        call_id = call.get("call_id", "N/A")
+        title = call.get("title", "N/A")
+        deadline = call.get("deadline", "N/A")
+        action_types = ", ".join(call.get("action_types", [])) or "N/A"
+        source = call.get("source", "N/A")
+        url = call.get("url", "")
+
+        with st.container():
             st.markdown(
                 f"""
                 <div style="
@@ -967,7 +978,6 @@ for i, call in enumerate(calls):
                     selected_call = call
 
     return selected_call
-
 
 def render_call_detail(call_data):
     st.markdown("### 📋 Seçilen Çağrı Detayı")
