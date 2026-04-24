@@ -1355,75 +1355,29 @@ def render_feature_dashboard():
     st.markdown("## 🎯 GrantMirror-AI Ne Yapar?")
 
     features = [
-        ("📡", "Canlı Çağrı", "Güncel Horizon çağrılarını EC API ve diğer kaynaklardan çeker.", "Canlı Veri"),
-        ("🎯", "AI Eşleştirme", "Proje fikrini en uygun çağrılarla eşleştirir.", "Matching"),
-        ("🧠", "RAG Motor", "Kriter, çağrı ve rehber bilgisini birlikte yorumlar.", "Knowledge"),
-        ("📋", "ESR Simülasyon", "Hakem formatına yakın değerlendirme raporu üretir.", "Evaluator"),
-        ("🛠️", "Koçluk", "Zayıf noktalar için somut düzeltme önerileri sunar.", "Coaching"),
-        ("📊", "Güven Aralığı", "Puan tahmini ve fonlanma olasılığı verir.", "Prediction"),
-        ("🔒", "Kimlik Taraması", "Kör değerlendirmeyi bozabilecek sinyalleri tespit eder.", "Blind Review"),
-        ("📰", "Canlı Haberler", "RSS ve scraper kaynaklarıyla Horizon haberlerini izler.", "News"),
+        ("📡", "Canlı Çağrı", "Güncel Horizon çağrılarını çeker.", "Canlı Veri"),
+        ("🎯", "AI Eşleştirme", "En uygun çağrılarla eşleştirir.", "Matching"),
+        ("🧠", "RAG Motor", "Kriter bazlı bilgi analizi yapar.", "Knowledge"),
+        ("📋", "ESR Simülasyon", "Hakem değerlendirmesi üretir.", "Evaluator"),
+        ("🛠️", "Koçluk", "Somut iyileştirme önerileri verir.", "Coaching"),
+        ("📊", "Güven Aralığı", "Fonlanma olasılığı hesaplar.", "Prediction"),
+        ("🔒", "Kimlik Taraması", "Kör değerlendirme kontrolü.", "Blind"),
+        ("📰", "Canlı Haberler", "Güncel EU haberleri.", "News"),
     ]
 
-    cards = ""
+    html = '<div style="display:grid;grid-template-columns:repeat(4,1fr);gap:16px;margin-top:20px;">'
 
     for icon, title, desc, tag in features:
-        cards += f"""
-        <div style="
-            background:white;
-            border:1px solid #eaecf0;
-            border-radius:22px;
-            padding:20px;
-            min-height:170px;
-            box-shadow:0 10px 28px rgba(16,24,40,0.06);
-        ">
-            <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:18px;">
-                <div style="
-                    width:52px;height:52px;
-                    border-radius:16px;
-                    background:linear-gradient(135deg,#eef4ff,#dbeafe);
-                    display:flex;
-                    align-items:center;
-                    justify-content:center;
-                    font-size:26px;
-                ">{icon}</div>
-                <div style="
-                    font-size:12px;
-                    font-weight:800;
-                    color:#175cd3;
-                    background:#eff4ff;
-                    padding:5px 10px;
-                    border-radius:999px;
-                ">{tag}</div>
-            </div>
+        html += f'<div style="background:white;border:1px solid #eaecf0;border-radius:20px;padding:16px;box-shadow:0 8px 24px rgba(0,0,0,0.05);">'
+        html += f'<div style="display:flex;justify-content:space-between;margin-bottom:10px;">'
+        html += f'<div style="font-size:24px">{icon}</div>'
+        html += f'<div style="font-size:11px;background:#eff4ff;color:#175cd3;padding:4px 8px;border-radius:999px;font-weight:700;">{tag}</div>'
+        html += '</div>'
+        html += f'<div style="font-weight:800;margin-bottom:6px;">{title}</div>'
+        html += f'<div style="font-size:13px;color:#667085;">{desc}</div>'
+        html += '</div>'
 
-            <div style="
-                font-size:18px;
-                font-weight:850;
-                color:#101828;
-                margin-bottom:8px;
-            ">{title}</div>
-
-            <div style="
-                font-size:14px;
-                color:#667085;
-                line-height:1.45;
-            ">{desc}</div>
-        </div>
-        """
-
-    html = f"""
-    <div style="
-        display:grid;
-        grid-template-columns:repeat(4,minmax(0,1fr));
-        gap:18px;
-        margin-top:20px;
-        margin-bottom:20px;
-        font-family:Inter,Arial,sans-serif;
-    ">
-        {cards}
-    </div>
-    """
+    html += "</div>"
 
     st.markdown(html, unsafe_allow_html=True)
     
