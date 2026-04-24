@@ -779,7 +779,7 @@ def render_call_dashboard():
             f"DB:{src_stats.get('local_db', 0)}",
         )
 
-       excel_bytes = calls_to_excel_bytes(calls)
+    excel_bytes = calls_to_excel_bytes(calls)
     st.download_button(
         f"📥 Excel İndir ({total} çağrı)", excel_bytes,
         "horizon_calls.xlsx",
