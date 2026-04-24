@@ -892,7 +892,7 @@ def render_call_dashboard():
             f"DB:{src_stats.get('local_db', 0)}",
         )
 
-       try:
+    try:
         excel_bytes = calls_to_excel_bytes(calls)
 
         st.download_button(
