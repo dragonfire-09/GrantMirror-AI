@@ -298,7 +298,7 @@ def _fetch_ec_calls(
                 debug["attempts"].append(attempt)
                 continue
 
-            data = response.json()
+            
             all_results = []
             total_results = 0
 
