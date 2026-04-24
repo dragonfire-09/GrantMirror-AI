@@ -342,6 +342,8 @@ for page_num in range(1, max_pages + 1):
                 parsed = _parse_ec_result(item)
                 if parsed and _keep_only_current_horizon(parsed):
                     calls.append(parsed)
+                    
+            calls = calls[:page_size]
 
             attempt["count"] = len(calls)
             debug["attempts"].append(attempt)
