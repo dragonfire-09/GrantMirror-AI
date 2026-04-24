@@ -665,15 +665,18 @@ def render_call_dashboard():
     st.markdown("## 📡 Canlı Çağrı Paneli")
 
     col1, col2, col3, col4 = st.columns([3, 2, 2, 1])
+
     with col1:
         search = st.text_input("🔍 Arama", placeholder="Anahtar kelime...")
+
     with col2:
         status_filter = st.selectbox(
-    "📋 Durum",
-    ["", "Open", "Forthcoming"],
-    index=0,
-    format_func=lambda x: x if x else "Open + Forthcoming",
-)
+            "📋 Durum",
+            ["", "Open", "Forthcoming"],
+            index=0,
+            format_func=lambda x: x if x else "Open + Forthcoming",
+        )
+
     with col3:
         dest_options = [""] + sorted(
             set(
@@ -682,46 +685,63 @@ def render_call_dashboard():
                 if c.get("destination")
             )
         )
+
         dest_filter = st.selectbox(
-            "🏛️ Küme", dest_options,
+            "🏛️ Küme",
+            dest_options,
             format_func=lambda x: (
                 x.split("–")[-1].strip() if "–" in x else (x if x else "Tümü")
             ),
         )
+
     with col4:
         st.markdown("")
         refresh_btn = st.button("🔄", help="Yenile", use_container_width=True)
 
     ac1, ac2 = st.columns([1, 3])
+
     with ac1:
         auto_refresh = st.checkbox("⏰ Otomatik güncelle", value=False)
+
     with ac2:
         refresh_interval = 300
+
         if auto_refresh:
             refresh_interval = st.select_slider(
-                "Aralık", options=[30, 60, 120, 300], value=60,
+                "Aralık",
+                options=[30, 60, 120, 300],
+                value=60,
                 format_func=lambda x: f"{x}s" if x < 60 else f"{x // 60}dk",
             )
 
     sc1, sc2, sc3, sc4 = st.columns(4)
+
     with sc1:
         use_ec_api = st.checkbox("🌐 EC API", value=True)
+
     with sc2:
         use_euresearch = st.checkbox("🇨🇭 Euresearch", value=True)
+
     with sc3:
         use_ufukavrupa = st.checkbox("🇹🇷 UfukAvrupa", value=True)
+
     with sc4:
         max_results = (
             st.number_input(
-                "Maks", min_value=10, max_value=500, value=100, step=50,
+                "Maks",
+                min_value=10,
+                max_value=500,
+                value=100,
+                step=50,
             )
             if use_ec_api
             else len(HORIZON_CALLS_DB)
         )
 
     if auto_refresh:
-        lr = st.session_state.get("last_refresh_time", 0)
-        if time.time() - lr > refresh_interval:
+        last_refresh = st.session_state.get("last_refresh_time", 0)
+
+        if time.time() - last_refresh > refresh_interval:
             st.session_state["last_refresh_time"] = time.time()
             st.session_state.call_cache.clear()
             st.rerun()
@@ -734,52 +754,60 @@ def render_call_dashboard():
         f"dash_{search}_{status_filter}_{dest_filter}_"
         f"{use_ec_api}_{use_euresearch}_{use_ufukavrupa}_{max_results}"
     )
+
     cached = st.session_state.call_cache.get(cache_key)
 
-if cached:
-    calls, src_stats = cached
-else:
-    with st.spinner("📡 Çağrılar çekiliyor..."):
-        calls, total = fetch_horizon_calls(
-            search_text=search,
-            status=status_filter,
-            programme="HORIZON",
-            page_size=max_results,
-        )
+    if cached:
+        calls, src_stats = cached
 
-        src_stats = {
-            "success": True,
-            "total_calls": total,
-        }
+    else:
+        with st.spinner("📡 Çağrılar çekiliyor..."):
+            calls, total = fetch_horizon_calls(
+                search_text=search,
+                status=status_filter,
+                programme="HORIZON",
+                page_size=max_results,
+            )
 
-        src_stats = {
-            "success": True,
-            "total_calls": total,
-        }
-        if status_filter:
-            calls = [
-                c for c in calls
-                if c.get("status", "").lower() == status_filter.lower()
-            ]
-        if dest_filter:
-            calls = [
-                c for c in calls
-                if dest_filter.lower() in clean_html(c.get("destination", "")).lower()
-            ]
-        if search:
-            kw = search.lower()
-            calls = [
-                c for c in calls
-                if kw in clean_html(c.get("title", "")).lower()
-                or kw in clean_html(c.get("call_id", "")).lower()
-                or kw in " ".join(c.get("keywords", [])).lower()
-                or kw in clean_html(c.get("scope", "")).lower()
-            ]
-        st.session_state.call_cache.set(cache_key, (calls, src_stats))
-        st.session_state["last_fetch_stats"] = src_stats
+            src_stats = {
+                "success": True,
+                "total_calls": total,
+                "ec_api": len(calls),
+                "euresearch": 0,
+                "ufukavrupa": 0,
+                "local_db": len(HORIZON_CALLS_DB),
+            }
 
-             # ─── EC API Debug Bilgisi ───
+            if status_filter:
+                calls = [
+                    c for c in calls
+                    if c.get("status", "").lower() == status_filter.lower()
+                ]
+
+            if dest_filter:
+                calls = [
+                    c for c in calls
+                    if dest_filter.lower()
+                    in clean_html(c.get("destination", "")).lower()
+                ]
+
+            if search:
+                keyword = search.lower()
+
+                calls = [
+                    c for c in calls
+                    if keyword in clean_html(c.get("title", "")).lower()
+                    or keyword in clean_html(c.get("call_id", "")).lower()
+                    or keyword in " ".join(c.get("keywords", [])).lower()
+                    or keyword in clean_html(c.get("scope", "")).lower()
+                ]
+
+            st.session_state.call_cache.set(cache_key, (calls, src_stats))
+            st.session_state["last_fetch_stats"] = src_stats
+
+    # ─── EC API Debug Bilgisi ───
     ec_debug = src_stats.get("ec_debug", {})
+
     if ec_debug:
         with st.expander("🔧 EC API Debug"):
             success = ec_debug.get("success", False)
@@ -818,8 +846,10 @@ else:
 
                 if att.get("url"):
                     st.caption(att["url"][:300])
+
                 if error:
                     st.error(error[:200])
+
                 if att.get("get_fallback"):
                     st.caption(
                         f"↪ GET fallback: HTTP {att.get('get_status', '?')}"
@@ -830,19 +860,24 @@ else:
         return None
 
     total = len(calls)
-    op = sum(1 for c in calls if c.get("status") == "Open")
-    fc = sum(1 for c in calls if c.get("status") == "Forthcoming")
-    cl = sum(1 for c in calls if c.get("status") == "Closed")
+    open_count = sum(1 for c in calls if c.get("status") == "Open")
+    forthcoming_count = sum(1 for c in calls if c.get("status") == "Forthcoming")
+    closed_count = sum(1 for c in calls if c.get("status") == "Closed")
 
     s1, s2, s3, s4, s5 = st.columns(5)
+
     with s1:
         st.metric("Toplam", total)
+
     with s2:
-        st.metric("🟢 Açık", op)
+        st.metric("🟢 Açık", open_count)
+
     with s3:
-        st.metric("🟡 Yaklaşan", fc)
+        st.metric("🟡 Yaklaşan", forthcoming_count)
+
     with s4:
-        st.metric("🔴 Kapanmış", cl)
+        st.metric("🔴 Kapanmış", closed_count)
+
     with s5:
         st.metric(
             "Kaynaklar",
@@ -852,55 +887,72 @@ else:
             f"DB:{src_stats.get('local_db', 0)}",
         )
 
-    excel_bytes = calls_to_excel_bytes(calls)
-    st.download_button(
-        f"📥 Excel İndir ({total} çağrı)", excel_bytes,
-        "horizon_calls.xlsx",
-        "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
-        use_container_width=True,
-    )
+    try:
+        excel_bytes = calls_to_excel_bytes(calls)
 
-    sort_by = st.selectbox(
-        "Sırala", ["deadline", "title", "status"],
-        format_func=lambda x: {
-            "deadline": "📅 Son Tarih", "title": "🔤 Başlık", "status": "📋 Durum",
-        }[x],
-        label_visibility="collapsed",
-    )
-    if sort_by == "deadline":
-        calls = sorted(calls, key=lambda c: c.get("deadline", "9999"))
-    elif sort_by == "title":
-        calls = sorted(calls, key=lambda c: clean_html(c.get("title", "")).lower())
-    else:
-        calls = sorted(
-            calls,
-            key=lambda c: {"Open": 0, "Forthcoming": 1, "Closed": 2}.get(
-                c.get("status", ""), 9
-            ),
+        st.download_button(
+            label=f"📥 Excel İndir ({len(calls)} çağrı)",
+            data=excel_bytes,
+            file_name="grantmirror_horizon_calls.xlsx",
+            mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+            use_container_width=True,
         )
 
-    ipp = 20
-    tp = max(1, (total + ipp - 1) // ipp)
-    if total > ipp:
-        _, pc, _ = st.columns([1, 2, 1])
-        with pc:
-            cp = st.number_input(f"Sayfa (1-{tp})", 1, tp, 1, 1)
-        si_idx = (cp - 1) * ipp
-        page_calls = calls[si_idx:si_idx + ipp]
-        st.caption(
-            f"Gösterilen: {si_idx + 1}-{min(si_idx + ipp, total)} / {total}"
-        )
-    else:
-        page_calls, cp = calls, 1
+    except Exception as e:
+        st.warning(f"Excel export hazırlanamadı: {e}")
 
     selected_call = None
-    for i, call in enumerate(page_calls):
-        gi = (cp - 1) * ipp + i
-        if render_call_card(call, gi):
-            selected_call = call
 
-    if total > ipp:
-        st.caption(f"Sayfa {cp}/{tp} · Toplam {total} çağrı")
+    for i, call in enumerate(calls):
+        status = call.get("status", "Unknown")
+
+        status_icon = {
+            "Open": "🟢",
+            "Forthcoming": "🟡",
+            "Closed": "🔴",
+        }.get(status, "⚪")
+
+        call_id = call.get("call_id", "N/A")
+        title = call.get("title", "N/A")
+        deadline = call.get("deadline", "N/A")
+        action_types = ", ".join(call.get("action_types", [])) or "N/A"
+        source = call.get("source", "N/A")
+        url = call.get("url", "")
+
+        with st.container():
+            st.markdown(
+                f"""
+                <div style="
+                    border:1px solid #e5e7eb;
+                    border-radius:16px;
+                    padding:18px;
+                    margin-bottom:14px;
+                    background:#ffffff;
+                    box-shadow:0 4px 12px rgba(0,0,0,0.04);
+                ">
+                    <div style="font-size:0.9rem;color:#667085;">
+                        {status_icon} <b>{status}</b> · 🏛️ {call_id} · 🛰️ {source}
+                    </div>
+                    <div style="font-size:1.15rem;font-weight:700;margin-top:8px;color:#101828;">
+                        {title}
+                    </div>
+                    <div style="font-size:0.9rem;color:#667085;margin-top:8px;">
+                        🏷️ {action_types} · 📅 {deadline}
+                    </div>
+                </div>
+                """,
+                unsafe_allow_html=True,
+            )
+
+            c1, c2 = st.columns([5, 1])
+
+            with c1:
+                if url:
+                    st.markdown(f"[🔗 Detay]({url})")
+
+            with c2:
+                if st.button("Seç →", key=f"select_call_{i}", use_container_width=True):
+                    selected_call = call
 
     return selected_call
 
