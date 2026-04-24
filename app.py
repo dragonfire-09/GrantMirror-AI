@@ -440,14 +440,18 @@ def render_call_card(call, index):
         try:
             dt = datetime.strptime(dl[:10], "%Y-%m-%d")
             days = (dt - datetime.now()).days
-            if days == 0:
+            if days < 0:
+                days_text = f"⏰ {abs(days)} gün önce kapandı"
+            elif days == 0:
                 days_text = "🔥 Bugün son gün!"
-            elif 0 < days <= 7:
+            elif days <= 7:
                 days_text = f"⏰ {days} gün kaldı!"
             elif days <= 30:
                 days_text = f"📅 {days} gün kaldı"
-            elif days > 30:
+            elif days <= 90:
                 days_text = f"📅 {days} gün"
+            else:
+                days_text = f"📅 ~{days // 30} ay"
         except Exception:
             pass
 
