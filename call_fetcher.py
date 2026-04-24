@@ -484,7 +484,7 @@ def _parse_portal_topic(topic: dict) -> Optional[Dict]:
     try:
         call_id = topic.get("identifier", topic.get("topicIdentifier", ""))
         title = topic.get("title", topic.get("topicTitle", ""))
-        status = topic.get("callStatus", topic.get("status", "Open"))
+        status_raw = topic.get("callStatus", topic.get("status", "Open"))
         deadline = topic.get("deadlineDate", topic.get("deadline", ""))
         budget = topic.get("budgetOverall", topic.get("budget", ""))
         desc = topic.get("description", topic.get("shortDescription", ""))
@@ -492,21 +492,14 @@ def _parse_portal_topic(topic: dict) -> Optional[Dict]:
 
         if isinstance(action_types, str):
             action_types = [action_types]
-
         if not call_id and not title:
             return None
 
-        # Status normalleştir
-        if isinstance(status, str):
-            status = _normalize_status(status)
+        status_display = _normalize_status(str(status_raw)) if isinstance(status_raw, str) else "Open"
 
-        # Deadline normalleştir
         if deadline:
             dm = re.search(r'(\d{4}-\d{2}-\d{2})', str(deadline))
-            if dm:
-                deadline = dm.group(1)
-            else:
-                deadline = str(deadline)[:10]
+            deadline = dm.group(1) if dm else str(deadline)[:10]
 
         link = ""
         if call_id:
@@ -520,7 +513,7 @@ def _parse_portal_topic(topic: dict) -> Optional[Dict]:
         return {
             "call_id": str(call_id) or "N/A",
             "title": clean_html(str(title)) or str(call_id) or "N/A",
-            "status": status,
+            "status": status_display,
             "deadline": deadline if deadline else "N/A",
             "start_date": "",
             "budget_total": str(budget) if budget else "",
@@ -534,41 +527,6 @@ def _parse_portal_topic(topic: dict) -> Optional[Dict]:
             "link": link,
             "source": "EC Portal",
             "topics": [{"topic_id": str(call_id)}] if call_id else [],
-        }
-    except Exception:
-        return None
-
-
-def _parse_cordis_result(result: dict) -> Optional[Dict]:
-    """CORDIS API sonucunu parse et."""
-    try:
-        title = result.get("title", "")
-        acronym = result.get("acronym", "")
-        call_id = result.get("callIdentifier", result.get("id", ""))
-        status = result.get("status", "Open")
-        start_date = result.get("startDate", "")
-        end_date = result.get("endDate", "")
-
-        if not title:
-            return None
-
-        return {
-            "call_id": str(call_id) or f"CORDIS-{hashlib.md5(title.encode()).hexdigest()[:8]}",
-            "title": clean_html(f"{acronym}: {title}" if acronym else title),
-            "status": _normalize_status(str(status)),
-            "deadline": end_date[:10] if end_date else "N/A",
-            "start_date": start_date[:10] if start_date else "",
-            "budget_total": "",
-            "budget_per_project": "",
-            "action_types": ["RIA"],
-            "description": clean_html(result.get("objective", ""))[:500],
-            "keywords": [],
-            "destination": "",
-            "scope": clean_html(result.get("objective", ""))[:1000],
-            "expected_outcomes": "",
-            "link": f"https://cordis.europa.eu/project/id/{call_id}" if call_id else "",
-            "source": "CORDIS",
-            "topics": [],
         }
     except Exception:
         return None
@@ -608,7 +566,6 @@ def _scrape_ec_portal(
         if resp.status_code != 200:
             return []
 
-        # JSON yanıt mı kontrol et
         try:
             data = resp.json()
             topics = (
@@ -624,7 +581,6 @@ def _scrape_ec_portal(
         except (ValueError, KeyError):
             pass
 
-        # HTML yanıtsa scrape et
         soup = BeautifulSoup(resp.text, "html.parser")
         seen = set()
         for el in soup.find_all(["div", "tr", "article"]):
