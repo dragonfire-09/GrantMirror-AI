@@ -1,382 +1,255 @@
 """
-GrantMirror-AI: Live call data fetcher from EC Funding & Tenders Portal.
-Uses the EC SEDIA Search API with fallback and Excel export.
+GrantMirror-AI: Horizon Europe Call Fetcher
+Live EC Funding & Tenders API integration with pagination and Excel export.
 """
-
 import requests
 import time
-from typing import List, Dict, Optional, Tuple
+import io
+from typing import Dict, List, Tuple, Optional
+from dataclasses import dataclass, field
+from datetime import datetime
+
+try:
+    import openpyxl
+    HAS_OPENPYXL = True
+except ImportError:
+    HAS_OPENPYXL = False
 
 
-EC_API_URL = "https://api.tech.ec.europa.eu/search-api/prod/rest/search"
+@dataclass
+class CallCache:
+    """Simple in-memory cache with TTL."""
+    ttl_minutes: int = 30
+    _store: Dict = field(default_factory=dict)
+    _timestamps: Dict = field(default_factory=dict)
+
+    def get(self, key: str):
+        if key in self._store:
+            ts = self._timestamps.get(key, 0)
+            if time.time() - ts < self.ttl_minutes * 60:
+                return self._store[key]
+            else:
+                del self._store[key]
+                del self._timestamps[key]
+        return None
+
+    def set(self, key: str, value):
+        self._store[key] = value
+        self._timestamps[key] = time.time()
+
+    def clear(self):
+        self._store.clear()
+        self._timestamps.clear()
+
+
+# ═══════════════════════════════════════════════════════════
+# EC FUNDING & TENDERS API
+# ═══════════════════════════════════════════════════════════
+EC_API_BASE = "https://api.tech.ec.europa.eu/search-api/prod/rest/search"
 
 
 def fetch_horizon_calls(
     programme: str = "HORIZON",
     status: str = "",
-    page_size: int = 30,
-    page: int = 1,
     search_text: str = "",
+    page_size: int = 100,
+    page_num: int = 1,
+    max_pages: int = 5,
+    fetch_all: bool = True,
 ) -> Tuple[List[Dict], int]:
     """
-    Fetch calls from EC Funding & Tenders Search API.
+    Fetch calls from EC API with pagination support.
+    If fetch_all=True, fetches multiple pages up to max_pages.
     """
+    all_calls = []
+    total_count = 0
 
-    query_parts = []
-
-    if programme:
-        query_parts.append(f"frameworkProgramme/{programme}")
-
-    if status:
-        status_code = {
-            "Open": "31094501",
-            "Forthcoming": "31094502",
-            "Closed": "31094503",
-        }.get(status, "")
-
-        if status_code:
-            query_parts.append(f"status/code/{status_code}")
-
-    if search_text and search_text.strip():
-        query_parts.append(search_text.strip())
-
-    query = " AND ".join(query_parts) if query_parts else "frameworkProgramme/HORIZON"
-
-    params = {
-        "apiKey": "SEDIA",
-        "text": query,
-        "type": "1",
-        "pageSize": str(page_size),
-        "pageNumber": str(page),
-        "sort": "sortStatus asc,deadlineDate desc",
-    }
-
-    headers = {
-        "Accept": "application/json",
-        "Content-Type": "application/json",
-    }
-
-    try:
-        resp = requests.get(
-            EC_API_URL,
-            params=params,
-            headers=headers,
-            timeout=30,
-        )
-
-        if resp.status_code != 200:
-            return _fetch_fallback(programme, status, page_size, page, search_text)
-
-        data = resp.json()
-        results = data.get("results", [])
-
-        calls = []
-        for item in results:
-            parsed = _parse_result(item)
-            if parsed:
-                calls.append(parsed)
-
-        return calls, len(calls)
-
-    except Exception:
-        return _fetch_fallback(programme, status, page_size, page, search_text)
-
-
-def _fetch_fallback(programme, status, page_size, page, search_text):
-    """
-    Fallback search using simpler free-text query.
-    """
-
-    query = search_text if search_text else "Horizon Europe"
-
-    params = {
-        "apiKey": "SEDIA",
-        "text": query,
-        "type": "1",
-        "pageSize": str(page_size),
-        "pageNumber": str(page),
-        "sort": "sortStatus asc",
-    }
-
-    try:
-        resp = requests.get(EC_API_URL, params=params, timeout=30)
-
-        if resp.status_code != 200:
-            return _fetch_cordis_fallback(programme, status, page_size, search_text)
-
-        data = resp.json()
-        results = data.get("results", [])
-
-        calls = []
-
-        for item in results:
-            parsed = _parse_result(item)
-
-            if not parsed:
-                continue
-
-            if programme:
-                prog = parsed.get("programme", "").upper()
-                if programme.upper() not in prog and "HORIZON" not in prog:
-                    continue
-
-            if status:
-                call_status = parsed.get("status", "").lower()
-                if status.lower() not in call_status:
-                    continue
-
-            calls.append(parsed)
-
-        return calls, len(calls)
-
-    except Exception:
-        return _fetch_cordis_fallback(programme, status, page_size, search_text)
-
-
-def _fetch_cordis_fallback(programme, status, page_size, search_text):
-    """
-    Second fallback using CORDIS API.
-    """
-
-    try:
-        query = search_text if search_text else "Horizon Europe"
-
-        url = "https://cordis.europa.eu/api/search"
-
+    for current_page in range(page_num, page_num + max_pages):
         params = {
-            "q": query,
-            "type": "project",
-            "subtype": "HE",
-            "page": "1",
-            "num": str(min(page_size, 20)),
-            "format": "json",
+            "apiKey": "SEDIA",
+            "text": search_text or "*",
+            "type": "1",  # calls
+            "pageSize": str(min(page_size, 100)),
+            "pageNumber": str(current_page),
         }
 
-        resp = requests.get(url, params=params, timeout=20)
+        # Build query filters
+        query_parts = []
+        if programme:
+            query_parts.append(f'programmePeriod/abbreviation="{programme}"')
+        if status:
+            query_parts.append(f'status/abbreviation="{status}"')
 
-        if resp.status_code == 200:
+        if query_parts:
+            params["query"] = " AND ".join(query_parts)
+
+        try:
+            resp = requests.get(EC_API_BASE, params=params, timeout=30)
+            resp.raise_for_status()
             data = resp.json()
-            results = data.get("payload", {}).get("results", [])
+        except Exception as e:
+            print(f"EC API error (page {current_page}): {e}")
+            break
 
-            calls = []
+        results = data.get("results", [])
+        total_count = data.get("totalResults", len(results))
 
-            for r in results:
-                calls.append(
-                    {
-                        "call_id": r.get("acronym", r.get("rcn", "?")),
-                        "title": r.get("title", "N/A"),
-                        "status": r.get("status", "?"),
-                        "programme": "HORIZON",
-                        "opening_date": r.get("startDate", ""),
-                        "deadline": r.get("endDate", ""),
-                        "budget": r.get("totalCost", "N/A"),
-                        "action_types": [r.get("fundingScheme", "")],
-                        "topics": [],
-                        "keywords": [],
-                        "url": f"https://cordis.europa.eu/project/id/{r.get('rcn', '')}",
-                        "raw": r,
-                        "source": "CORDIS",
-                    }
-                )
+        if not results:
+            break
 
-            return calls, len(calls)
+        for item in results:
+            meta = item.get("metadata", {})
+            call_info = _parse_call_metadata(meta)
+            if call_info:
+                all_calls.append(call_info)
 
-    except Exception:
-        pass
+        # Stop if we have all results or not fetching all
+        if not fetch_all or len(all_calls) >= total_count:
+            break
 
-    sample = _get_sample_calls()
-    return sample, len(sample)
+        # Be nice to the API
+        time.sleep(0.3)
+
+    # Deduplicate by call_id
+    seen = set()
+    unique_calls = []
+    for c in all_calls:
+        cid = c.get("call_id", "")
+        if cid and cid not in seen:
+            seen.add(cid)
+            unique_calls.append(c)
+
+    return unique_calls, total_count
 
 
-def _parse_result(item: Dict) -> Optional[Dict]:
-    """
-    Parse a single EC API result.
-    """
-
+def _parse_call_metadata(meta: Dict) -> Optional[Dict]:
+    """Parse EC API metadata into our call format."""
     try:
-        meta = item.get("metadata", {})
+        call_id = _extract_field(meta, "identifier") or _extract_field(meta, "ccm2Id")
+        title = _extract_field(meta, "title")
 
-        if not meta:
-            meta = item
-
-        def _get(key, default=""):
-            val = meta.get(key, default)
-
-            if isinstance(val, list):
-                return val[0] if val else default
-
-            if isinstance(val, dict):
-                return (
-                    val.get("description")
-                    or val.get("abbr")
-                    or val.get("code")
-                    or default
-                )
-
-            return str(val) if val else default
-
-        def _get_list(key):
-            val = meta.get(key, [])
-
-            if isinstance(val, str):
-                return [val]
-
-            if isinstance(val, list):
-                return val
-
-            if isinstance(val, dict):
-                return [str(val)]
-
-            return []
-
-        call_id = _get("identifier", _get("callIdentifier", _get("ccm2Id", "")))
-        title = _get("title", "")
-
-        if not title and not call_id:
+        if not call_id and not title:
             return None
 
-        status_raw = _get("status", "")
+        status_raw = _extract_field(meta, "status")
+        status = "Open"
+        if status_raw:
+            sl = status_raw.lower()
+            if "closed" in sl:
+                status = "Closed"
+            elif "forthcoming" in sl or "upcoming" in sl:
+                status = "Forthcoming"
 
-        if isinstance(meta.get("status"), dict):
-            status_raw = meta["status"].get(
-                "abbr",
-                meta["status"].get("description", ""),
-            )
+        deadline = _extract_field(meta, "deadlineDate") or ""
+        if not deadline:
+            deadline = _extract_field(meta, "plannedClosingDate") or ""
 
-        status = _normalize_status(status_raw)
-
-        deadline = _get("deadlineDate", _get("deadlineDates", ""))
-        opening = _get("startDate", _get("openingDate", ""))
-        budget = _get("budget", _get("callBudget", "N/A"))
-
-        action_types = _get_list("typesOfAction")
+        # Parse action types
+        action_types = []
+        at_raw = _extract_field(meta, "typesOfAction")
+        if at_raw:
+            if isinstance(at_raw, list):
+                action_types = at_raw
+            else:
+                action_types = [s.strip() for s in str(at_raw).split(",")]
 
         if not action_types:
-            action_types = _get_list("actionType")
+            action_types = _detect_action_types_from_text(call_id or "", title or "")
 
-        if not action_types:
-            action_types = _get_list("fundingScheme")
-
-        topic_ids = _get_list("topicIdentifier")
-        topic_titles = _get_list("topicTitle")
-
+        # Parse topics
         topics = []
-
-        for i, tid in enumerate(topic_ids):
-            t_title = topic_titles[i] if i < len(topic_titles) else tid
-            topics.append(
-                {
-                    "topic_id": str(tid),
-                    "title": str(t_title),
-                }
-            )
-
-        keywords = _get_list("keywords")
-
-        programme = (
-            " / ".join(str(x) for x in _get_list("programmePeriod"))
-            or _get("frameworkProgramme", "HORIZON")
-        )
-
-        url_val = _get("url", "")
-
-        if not url_val and topic_ids:
-            url_val = (
-                "https://ec.europa.eu/info/funding-tenders/opportunities/"
-                f"portal/screen/opportunities/topic-details/{topic_ids[0]}"
-            )
-
-        elif not url_val and call_id:
-            url_val = (
-                "https://ec.europa.eu/info/funding-tenders/opportunities/"
-                f"portal/screen/opportunities/calls-for-proposals?callIdentifier={call_id}"
-            )
+        topics_raw = meta.get("topics", [])
+        if isinstance(topics_raw, list):
+            for t in topics_raw:
+                if isinstance(t, dict):
+                    topics.append(t)
+                elif isinstance(t, str):
+                    topics.append({"topic_id": t})
 
         return {
-            "call_id": call_id or "N/A",
-            "title": title or "N/A",
+            "call_id": call_id or "UNKNOWN",
+            "title": title or "Untitled",
             "status": status,
-            "programme": programme,
-            "opening_date": opening,
             "deadline": deadline,
-            "budget": str(budget),
-            "action_types": action_types,
+            "action_types": action_types if action_types else ["RIA"],
             "topics": topics,
-            "keywords": keywords,
-            "url": url_val,
-            "raw": item,
-            "source": "EC_API",
+            "budget_total": _extract_field(meta, "budget") or "",
+            "description": _extract_field(meta, "description") or "",
         }
-
     except Exception:
         return None
 
 
-def _normalize_status(status_raw: str) -> str:
-    """
-    Normalize call status.
-    """
+def _extract_field(meta: Dict, key: str) -> Optional[str]:
+    """Extract a field from EC API metadata (handles nested structures)."""
+    if key in meta:
+        val = meta[key]
+        if isinstance(val, list) and val:
+            if isinstance(val[0], dict):
+                return val[0].get("value", str(val[0]))
+            return str(val[0])
+        return str(val) if val else None
+    return None
 
-    text = str(status_raw).lower()
 
-    if "open" in text:
-        return "Open"
-
-    if "forthcoming" in text or "planned" in text:
-        return "Forthcoming"
-
-    if "closed" in text:
-        return "Closed"
-
-    return str(status_raw) if status_raw else "Unknown"
+def _detect_action_types_from_text(call_id: str, title: str) -> List[str]:
+    """Detect action types from call ID or title."""
+    text = f"{call_id} {title}".upper()
+    types = []
+    if "MSCA" in text and "DN" in text:
+        types.append("MSCA-DN")
+    if "MSCA" in text and "PF" in text:
+        types.append("MSCA-PF")
+    if "ERC" in text:
+        if "STG" in text:
+            types.append("ERC-StG")
+        elif "COG" in text:
+            types.append("ERC-CoG")
+        elif "ADG" in text:
+            types.append("ERC-AdG")
+        else:
+            types.append("ERC")
+    if "EIC" in text and "PATHFINDER" in text:
+        types.append("EIC-Pathfinder")
+    if "EIC" in text and "ACCELERATOR" in text:
+        types.append("EIC-Accelerator")
+    if "EIC" in text and "TRANSITION" in text:
+        types.append("EIC-Transition")
+    if "CSA" in text:
+        types.append("CSA")
+    if "IA" in text and "RIA" not in text:
+        types.append("IA")
+    if "RIA" in text:
+        types.append("RIA")
+    return types
 
 
 def fetch_topic_details(topic_id: str) -> Optional[Dict]:
-    """
-    Fetch detailed topic information.
-    """
-
+    """Fetch detailed topic information from EC API."""
     params = {
         "apiKey": "SEDIA",
-        "text": f'identifier/"{topic_id}"',
+        "text": f'"{topic_id}"',
         "type": "1",
         "pageSize": "5",
     }
 
     try:
-        resp = requests.get(EC_API_URL, params=params, timeout=20)
+        resp = requests.get(EC_API_BASE, params=params, timeout=20)
+        resp.raise_for_status()
+        data = resp.json()
+        results = data.get("results", [])
 
-        if resp.status_code == 200:
-            data = resp.json()
-            results = data.get("results", [])
-
-            for r in results:
-                meta = r.get("metadata", {})
-                ident = meta.get("identifier", "")
-
-                if isinstance(ident, list):
-                    ident = ident[0] if ident else ""
-
-                if topic_id.lower() in str(ident).lower():
-                    desc = meta.get("description", "")
-
-                    if isinstance(desc, list):
-                        desc = desc[0] if desc else ""
-
-                    title = meta.get("title", "")
-
-                    if isinstance(title, list):
-                        title = title[0] if title else ""
-
-                    return {
-                        "topic_id": topic_id,
-                        "title": title,
-                        "description": desc,
-                        "keywords": meta.get("keywords", []),
-                        "deadline": meta.get("deadlineDate", ""),
-                        "action_type": meta.get("typesOfAction", []),
-                    }
-
+        for item in results:
+            meta = item.get("metadata", {})
+            identifier = _extract_field(meta, "identifier") or ""
+            if topic_id.lower() in identifier.lower():
+                return {
+                    "topic_id": topic_id,
+                    "title": _extract_field(meta, "title") or "",
+                    "description": _extract_field(meta, "description") or "",
+                    "budget": _extract_field(meta, "budget") or "",
+                    "conditions": _extract_field(meta, "conditions") or "",
+                }
     except Exception:
         pass
 
@@ -384,292 +257,121 @@ def fetch_topic_details(topic_id: str) -> Optional[Dict]:
 
 
 def detect_action_type_from_call(call_data: Dict) -> str:
-    """
-    Detect primary action type from call metadata.
-    """
-
+    """Detect action type from call data."""
     action_types = call_data.get("action_types", [])
+    if action_types:
+        return action_types[0]
 
-    all_text = " ".join(
-        action_types
-        + [
-            call_data.get("title", ""),
-            call_data.get("call_id", ""),
-        ]
-    ).upper()
-
-    if "MSCA" in all_text or "MARIE" in all_text:
+    text = f"{call_data.get('call_id', '')} {call_data.get('title', '')}".upper()
+    if "MSCA" in text and "DN" in text:
         return "MSCA-DN"
-
-    if "ERC" in all_text:
+    if "ERC" in text:
         return "ERC-StG"
-
-    if "PATHFINDER" in all_text:
-        return "EIC-Pathfinder-Open"
-
-    if "ACCELERATOR" in all_text:
+    if "EIC" in text and "PATHFINDER" in text:
+        return "EIC-Pathfinder"
+    if "EIC" in text and "ACCELERATOR" in text:
         return "EIC-Accelerator"
-
-    if "EIC" in all_text:
-        return "EIC-Pathfinder-Open"
-
-    if "CSA" in all_text:
+    if "CSA" in text:
         return "CSA"
-
-    if "IA" in all_text and "RIA" not in all_text:
+    if "IA" in text:
         return "IA"
-
     return "RIA"
 
 
-def build_call_specific_criteria(
-    call_data: Dict,
-    topic_details: Optional[Dict] = None,
-) -> Dict:
-    """
-    Build call-specific evaluation context.
-    """
+def build_call_specific_criteria(call_data: Dict, topic_details: Optional[Dict] = None) -> Dict:
+    """Build evaluation context from call + topic data."""
+    context_parts = [
+        f"Call: {call_data.get('call_id', 'N/A')}",
+        f"Title: {call_data.get('title', 'N/A')}",
+        f"Action Types: {', '.join(call_data.get('action_types', []))}",
+        f"Deadline: {call_data.get('deadline', 'N/A')}",
+    ]
+
+    if call_data.get("description"):
+        context_parts.append(f"\nCall Description:\n{call_data['description'][:2000]}")
+
+    if topic_details:
+        if topic_details.get("description"):
+            context_parts.append(f"\nTopic Description:\n{topic_details['description'][:3000]}")
+        if topic_details.get("conditions"):
+            context_parts.append(f"\nConditions:\n{topic_details['conditions'][:1000]}")
 
     action_type = detect_action_type_from_call(call_data)
 
-    context = {
+    return {
         "action_type": action_type,
+        "evaluation_context": "\n".join(context_parts),
         "call_id": call_data.get("call_id", ""),
-        "call_title": call_data.get("title", ""),
         "deadline": call_data.get("deadline", ""),
-        "budget": call_data.get("budget", ""),
-        "topic_scope": "",
-        "expected_outcomes": [],
-        "topic_keywords": call_data.get("keywords", []),
     }
-
-    if topic_details:
-        desc = topic_details.get("description", "")
-        context["topic_scope"] = desc[:3000] if desc else ""
-        context["topic_keywords"] = topic_details.get(
-            "keywords",
-            context["topic_keywords"],
-        )
-        context["expected_outcomes"] = _extract_outcomes(desc)
-
-    context["evaluation_context"] = _build_context_text(context)
-
-    return context
-
-
-def _extract_outcomes(desc: str) -> List[str]:
-    """
-    Extract expected outcomes from topic description.
-    """
-
-    outcomes = []
-    lines = desc.split("\n")
-    capture = False
-
-    for line in lines:
-        s = line.strip()
-        lo = s.lower()
-
-        if "expected outcome" in lo or "expected impact" in lo:
-            capture = True
-            continue
-
-        if capture:
-            if s.startswith(("-", "•", "–", "*")) or (
-                len(s) > 15 and s[0].isupper()
-            ):
-                outcomes.append(s.lstrip("-•–* "))
-
-            elif s == "" and outcomes:
-                capture = False
-
-    return outcomes[:10]
-
-
-def _build_context_text(ctx: Dict) -> str:
-    """
-    Build evaluation context text for LLM.
-    """
-
-    parts = [
-        f"CALL: {ctx.get('call_title', 'N/A')}",
-        f"ACTION TYPE: {ctx.get('action_type', 'N/A')}",
-        f"DEADLINE: {ctx.get('deadline', 'N/A')}",
-        f"BUDGET: {ctx.get('budget', 'N/A')}",
-    ]
-
-    if ctx.get("topic_scope"):
-        parts.append(f"\nTOPIC SCOPE:\n{ctx['topic_scope'][:2000]}")
-
-    outcomes = ctx.get("expected_outcomes", [])
-
-    if outcomes:
-        parts.append("\nEXPECTED OUTCOMES:")
-
-        for i, outcome in enumerate(outcomes, 1):
-            parts.append(f"  {i}. {outcome}")
-
-    keywords = ctx.get("topic_keywords", [])
-
-    if keywords:
-        parts.append(
-            f"\nKEYWORDS: {', '.join(str(k) for k in keywords[:15])}"
-        )
-
-    return "\n".join(parts)
 
 
 def calls_to_excel_bytes(calls: List[Dict]) -> bytes:
-    """
-    Convert calls to styled Excel file bytes.
-    """
+    """Convert calls list to Excel bytes for download."""
+    if HAS_OPENPYXL:
+        wb = openpyxl.Workbook()
+        ws = wb.active
+        ws.title = "Horizon Calls"
 
-    import pandas as pd
-    from io import BytesIO
+        # Header
+        headers = [
+            "Call ID", "Title", "Status", "Deadline",
+            "Action Types", "Destination", "Budget",
+            "Expected Outcomes", "Scope", "Keywords",
+        ]
+        ws.append(headers)
 
-    rows = []
+        # Style header
+        from openpyxl.styles import Font, PatternFill, Alignment
+        header_font = Font(bold=True, color="FFFFFF", size=11)
+        header_fill = PatternFill(start_color="4F46E5", end_color="4F46E5", fill_type="solid")
+        for col_idx, cell in enumerate(ws[1], 1):
+            cell.font = header_font
+            cell.fill = header_fill
+            cell.alignment = Alignment(horizontal="center")
 
-    for c in calls:
-        rows.append(
-            {
-                "Call ID": c.get("call_id", ""),
-                "Title": c.get("title", ""),
-                "Status": c.get("status", ""),
-                "Programme": c.get("programme", ""),
-                "Opening Date": c.get("opening_date", ""),
-                "Deadline": c.get("deadline", ""),
-                "Budget": c.get("budget", ""),
-                "Action Types": ", ".join(c.get("action_types", [])),
-                "Topics": ", ".join(
-                    t.get("topic_id", "") for t in c.get("topics", [])
-                ),
-                "Keywords": ", ".join(str(k) for k in c.get("keywords", [])),
-                "URL": c.get("url", ""),
-                "Source": c.get("source", ""),
-            }
-        )
+        # Data rows
+        for call in calls:
+            ws.append([
+                call.get("call_id", ""),
+                call.get("title", ""),
+                call.get("status", ""),
+                call.get("deadline", ""),
+                ", ".join(call.get("action_types", [])),
+                call.get("destination", ""),
+                call.get("budget_per_project", call.get("budget_total", "")),
+                call.get("expected_outcomes", ""),
+                call.get("scope", ""),
+                ", ".join(call.get("keywords", [])),
+            ])
 
-    df = pd.DataFrame(rows)
+        # Auto-width
+        for col in ws.columns:
+            max_length = 0
+            col_letter = col[0].column_letter
+            for cell in col:
+                try:
+                    if len(str(cell.value)) > max_length:
+                        max_length = len(str(cell.value))
+                except Exception:
+                    pass
+            ws.column_dimensions[col_letter].width = min(max_length + 2, 50)
 
-    output = BytesIO()
-
-    with pd.ExcelWriter(output, engine="xlsxwriter") as writer:
-        df.to_excel(writer, index=False, sheet_name="Horizon Calls")
-
-        workbook = writer.book
-        worksheet = writer.sheets["Horizon Calls"]
-
-        header_format = workbook.add_format(
-            {
-                "bold": True,
-                "bg_color": "#101828",
-                "font_color": "white",
-                "border": 1,
-            }
-        )
-
-        for col_num, value in enumerate(df.columns):
-            worksheet.write(0, col_num, value, header_format)
-            worksheet.set_column(col_num, col_num, 24)
-
-        worksheet.freeze_panes(1, 0)
-        worksheet.autofilter(0, 0, len(df), len(df.columns) - 1)
-
-    output.seek(0)
-    return output.getvalue()
-
-
-def _get_sample_calls() -> List[Dict]:
-    """
-    Return sample calls when API is unavailable.
-    """
-
-    return [
-        {
-            "call_id": "HORIZON-CL4-2025-HUMAN-01",
-            "title": "A human-centred and ethical development of digital and industrial technologies 2025",
-            "status": "Open",
-            "programme": "HORIZON",
-            "opening_date": "2024-10-22",
-            "deadline": "2025-02-19",
-            "budget": "EUR 78,000,000",
-            "action_types": ["RIA", "IA"],
-            "topics": [
-                {
-                    "topic_id": "HORIZON-CL4-2025-HUMAN-01-01",
-                    "title": "Next Generation AI",
-                }
-            ],
-            "keywords": ["AI", "digital", "human-centric"],
-            "url": "https://ec.europa.eu/info/funding-tenders/opportunities/portal",
-            "raw": {},
-            "source": "sample",
-        },
-        {
-            "call_id": "HORIZON-CL6-2025-BIODIV-01",
-            "title": "Biodiversity and ecosystem services 2025",
-            "status": "Open",
-            "programme": "HORIZON",
-            "opening_date": "2024-10-22",
-            "deadline": "2025-02-19",
-            "budget": "EUR 120,000,000",
-            "action_types": ["RIA", "IA", "CSA"],
-            "topics": [
-                {
-                    "topic_id": "HORIZON-CL6-2025-BIODIV-01-01",
-                    "title": "Biodiversity monitoring",
-                }
-            ],
-            "keywords": ["biodiversity", "ecosystem", "nature-based solutions"],
-            "url": "https://ec.europa.eu/info/funding-tenders/opportunities/portal",
-            "raw": {},
-            "source": "sample",
-        },
-        {
-            "call_id": "HORIZON-MSCA-2025-DN-01",
-            "title": "MSCA Doctoral Networks 2025",
-            "status": "Forthcoming",
-            "programme": "HORIZON",
-            "opening_date": "2025-05-15",
-            "deadline": "2025-11-27",
-            "budget": "EUR 451,000,000",
-            "action_types": ["MSCA-DN"],
-            "topics": [
-                {
-                    "topic_id": "HORIZON-MSCA-2025-DN-01",
-                    "title": "Doctoral Networks",
-                }
-            ],
-            "keywords": ["MSCA", "doctoral", "training", "mobility"],
-            "url": "https://ec.europa.eu/info/funding-tenders/opportunities/portal",
-            "raw": {},
-            "source": "sample",
-        },
-    ]
-
-
-class CallCache:
-    """
-    Simple TTL cache.
-    """
-
-    def __init__(self, ttl_minutes=30):
-        self._cache = {}
-        self._ttl = ttl_minutes * 60
-
-    def get(self, key):
-        if key in self._cache:
-            val, ts = self._cache[key]
-
-            if time.time() - ts < self._ttl:
-                return val
-
-            del self._cache[key]
-
-        return None
-
-    def set(self, key, value):
-        self._cache[key] = (value, time.time())
-
-    def clear(self):
-        self._cache.clear()
+        buf = io.BytesIO()
+        wb.save(buf)
+        return buf.getvalue()
+    else:
+        # Fallback: CSV as bytes
+        import csv
+        buf = io.StringIO()
+        writer = csv.writer(buf)
+        writer.writerow(["Call ID", "Title", "Status", "Deadline", "Action Types"])
+        for call in calls:
+            writer.writerow([
+                call.get("call_id", ""),
+                call.get("title", ""),
+                call.get("status", ""),
+                call.get("deadline", ""),
+                ", ".join(call.get("action_types", [])),
+            ])
+        return buf.getvalue().encode("utf-8")
