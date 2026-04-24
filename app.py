@@ -1350,6 +1350,48 @@ def render_calls_page():
                 use_container_width=True,
             ):
                 st.rerun()
+def render_feature_dashboard():
+    st.markdown("## 🎯 GrantMirror-AI Ne Yapar?")
+
+    features = [
+        ("📡", "Canlı Çağrı", "EC API + Euresearch + UfukAvrupa"),
+        ("🎯", "AI Eşleştirme", "En uygun çağrılarla eşleştirir"),
+        ("🧠", "RAG Motor", "Kriter bazlı AI bilgi sentezi"),
+        ("📋", "ESR Simülasyon", "Gerçek hakem formatı"),
+        ("🎯", "Koçluk", "Somut düzeltme önerileri"),
+        ("📊", "Güven Aralığı", "Puan + fonlanma olasılığı"),
+        ("🔒", "Kimlik Taraması", "Kör değerlendirme kontrolü"),
+        ("📰", "Canlı Haberler", "RSS + Scraper + EC API"),
+    ]
+
+    cols = st.columns(4)
+
+    for i, (icon, title, desc) in enumerate(features):
+        with cols[i % 4]:
+            if st.button(
+                f"{icon} {title}",
+                key=f"feat_{i}",
+                use_container_width=True,
+            ):
+                if title in ["Canlı Çağrı", "AI Eşleştirme"]:
+                    st.session_state["nav"] = "📡 Canlı Çağrılar"
+                elif title == "Canlı Haberler":
+                    st.session_state["nav"] = "📰 Haberler"
+                else:
+                    st.session_state["nav"] = "🔬 Değerlendirme"
+
+                st.rerun()
+
+            st.markdown(
+                f"""
+                <div class="gm-feature-card">
+                    <div class="gm-feature-icon">{icon}</div>
+                    <div class="gm-feature-title">{title}</div>
+                    <div class="gm-feature-desc">{desc}</div>
+                </div>
+                """,
+                unsafe_allow_html=True,
+            )
 
 
 def render_evaluation_page():
