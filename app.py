@@ -1458,23 +1458,8 @@ def render_evaluation_page():
     )
 
     if not uploaded:
-        st.markdown("## 🎯 GrantMirror-AI Ne Yapar?")
-        fc1, fc2 = st.columns(2)
-        with fc1:
-            st.markdown("""
-- 📡 **Canlı Çağrı** — EC API + Euresearch + UfukAvrupa
-- 🎯 **AI Eşleştirme** — En uygun çağrılarla eşleştirir
-- 🧠 **RAG Motor** — Kriter bazlı AI bilgi sentezi
-- 📋 **ESR Simülasyon** — Gerçek hakem formatı
-""")
-        with fc2:
-            st.markdown("""
-- 🎯 **Koçluk** — Somut düzeltme önerileri
-- 📊 **Güven Aralığı** — Puan + fonlanma olasılığı
-- 🔒 **Kimlik Taraması** — Kör değerlendirme kontrolü
-- 📰 **Canlı Haberler** — RSS + Scraper + EC API
-""")
-        return
+    render_feature_dashboard()
+    return
 
     fb, fn = uploaded.read(), uploaded.name
     with st.spinner("📄 Belge okunuyor..."):
