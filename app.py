@@ -1442,9 +1442,21 @@ def render_evaluation_page():
         st.caption("⚠️ Resmî EC değerlendirmesinin yerini almaz.")
 
     # MAIN
-    st.markdown("## 📤 Teklif Yükleme")
+        st.markdown(
+        """
+        <div class="gm-upload-card">
+            <h2>📤 Teklif Yükleme</h2>
+            <div class="gm-upload-subtitle">
+                Horizon Europe Part B dokümanını yükleyin; sistem çağrı uyumu, ESR simülasyonu ve koçluk çıktısı üretir.
+            </div>
+        </div>
+        """,
+        unsafe_allow_html=True,
+    )
+
     uploaded = st.file_uploader(
-        "Horizon Europe Part B (PDF / DOCX)", type=["pdf", "docx", "doc"],
+        "Horizon Europe Part B (PDF / DOCX)",
+        type=["pdf", "docx", "doc"],
     )
 
     if not uploaded:
