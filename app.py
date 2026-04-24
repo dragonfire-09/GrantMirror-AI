@@ -1478,9 +1478,9 @@ uploaded = st.file_uploader(
     type=["pdf", "docx", "doc"],
 )
 
-if not uploaded:
-    render_feature_dashboard()
-    return
+    if not uploaded:
+        render_feature_dashboard()
+        return
 
     fb, fn = uploaded.read(), uploaded.name
     with st.spinner("📄 Belge okunuyor..."):
