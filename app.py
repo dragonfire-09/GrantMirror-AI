@@ -416,14 +416,23 @@ class Evaluator:
 # ═══════════════════════════════════════════════════════════
 # UI COMPONENTS
 # ═══════════════════════════════════════════════════════════
-def render_header():
-    st.markdown("# 🔬 GrantMirror-AI")
-    st.caption("Horizon Europe Proposal Pre-Screening & ESR Simulator")
-    st.caption(
-        "📡 Canlı Çağrı · 🎯 AI Eşleştirme · 🧠 RAG · 📋 ESR · "
-        "🎯 Koçluk · 📊 Güven Aralığı · 📰 Canlı Haberler"
+def render_polished_header():
+    st.markdown(
+        """
+        <div class="gm-top-hero">
+            <h1>🔬 GrantMirror-AI</h1>
+            <p>Horizon Europe proposal pre-screening, call matching and ESR-style evaluator simulation.</p>
+            <div class="gm-hero-badges">
+                <span class="gm-hero-badge">📡 Live Calls</span>
+                <span class="gm-hero-badge">🎯 AI Matching</span>
+                <span class="gm-hero-badge">🧠 RAG Engine</span>
+                <span class="gm-hero-badge">📋 ESR Simulation</span>
+                <span class="gm-hero-badge">📊 Funding Probability</span>
+            </div>
+        </div>
+        """,
+        unsafe_allow_html=True,
     )
-    st.divider()
 
 
 def render_call_card(call, index):
