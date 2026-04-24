@@ -905,7 +905,7 @@ def render_call_dashboard():
     except Exception as e:
         st.warning(f"Excel export hazırlanamadı: {e}")
 
-            selected_call = None
+    selected_call = None
 
     # Pagination
     items_per_page = 6
