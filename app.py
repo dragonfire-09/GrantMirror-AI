@@ -1730,11 +1730,19 @@ def render_evaluation_page():
 def main():
     render_header()
     inject_modern_css()
+
+    pages = ["🔬 Değerlendirme", "📡 Canlı Çağrılar", "📰 Haberler"]
+    default_page = st.session_state.get("nav", "🔬 Değerlendirme")
+
     page = st.sidebar.radio(
         "📌",
-        ["🔬 Değerlendirme", "📡 Canlı Çağrılar", "📰 Haberler"],
+        pages,
+        index=pages.index(default_page) if default_page in pages else 0,
         label_visibility="collapsed",
     )
+
+    st.session_state["nav"] = page
+    
     with st.sidebar:
         st.divider()
         cached_stats = st.session_state.get("last_fetch_stats", None)
