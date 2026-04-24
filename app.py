@@ -850,10 +850,9 @@ def render_evaluation_page():
 # ═══════════════════════════════════════════════════════════
 def main():
     render_header()
-    page = st.sidebar.radio("📌", ["🔬 Değerlendirme", "📡 Canlı Çağrılar"], label_visibility="collapsed")
+    page = st.sidebar.radio("📌", ["🔬 Değerlendirme", "📡 Canlı Çağrılar", "📰 Haberler"], label_visibility="collapsed")
     with st.sidebar:
         st.divider()
-        # Dinamik stats — cache'den veya DB'den
         cached_stats = st.session_state.get("last_fetch_stats", None)
         if cached_stats:
             t = cached_stats.get("total", 0)
@@ -866,6 +865,8 @@ def main():
             st.caption(f"📊 DB: {stats['total']} | 🟢 {stats['open']} | 🟡 {stats['forthcoming']}")
     if page == "📡 Canlı Çağrılar":
         render_calls_page()
+    elif page == "📰 Haberler":
+        render_news_page()
     else:
         render_evaluation_page()
 
