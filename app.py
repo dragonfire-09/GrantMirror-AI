@@ -778,7 +778,7 @@ else:
         st.session_state.call_cache.set(cache_key, (calls, src_stats))
         st.session_state["last_fetch_stats"] = src_stats
 
-           # ─── EC API Debug Bilgisi ───
+             # ─── EC API Debug Bilgisi ───
     ec_debug = src_stats.get("ec_debug", {})
     if ec_debug:
         with st.expander("🔧 EC API Debug"):
