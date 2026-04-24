@@ -853,8 +853,17 @@ def main():
     page = st.sidebar.radio("📌", ["🔬 Değerlendirme", "📡 Canlı Çağrılar"], label_visibility="collapsed")
     with st.sidebar:
         st.divider()
-        stats = get_call_stats()
-        st.caption(f"📊 DB: {stats['total']} | 🟢 {stats['open']} | 🟡 {stats['forthcoming']}")
+        # Dinamik stats — cache'den veya DB'den
+        cached_stats = st.session_state.get("last_fetch_stats", None)
+        if cached_stats:
+            t = cached_stats.get("total", 0)
+            ec = cached_stats.get("ec_api", 0)
+            eur = cached_stats.get("euresearch", 0)
+            db = cached_stats.get("local_db", 0)
+            st.caption(f"📊 Toplam: {t} | EC:{ec} EUR:{eur} DB:{db}")
+        else:
+            stats = get_call_stats()
+            st.caption(f"📊 DB: {stats['total']} | 🟢 {stats['open']} | 🟡 {stats['forthcoming']}")
     if page == "📡 Canlı Çağrılar":
         render_calls_page()
     else:
