@@ -672,7 +672,7 @@ def render_call_dashboard():
         search = st.text_input("🔍 Arama", placeholder="Anahtar kelime...")
 
     with col2:
-        status_filter = st.selectbox(
+    status_filter = st.selectbox(
         "📋 Durum",
         ["", "Open", "Forthcoming"],
         index=0,
