@@ -34,7 +34,11 @@ from document_parser import parse_proposal, ParsedProposal, SectionType
 from eligibility_checker import run_eligibility_checks, CheckStatus, EligibilityReport
 from knowledge_base import HorizonKnowledgeBase
 from deidentifier import scan_for_identity_signals, generate_deidentification_report
-from report_generator import generate_esr_report, generate_coaching_report
+from report_generator import (
+    generate_esr_report,
+    generate_coaching_report,
+    markdown_to_pdf_bytes,
+)
 from call_fetcher import (
     fetch_horizon_calls,
     fetch_topic_details,
