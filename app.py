@@ -755,7 +755,7 @@ def render_call_dashboard():
         st.rerun()
 
     cache_key = (
-        f"dash_{search}_{status_filter}_{dest_filter}_"
+        f"v5_dash_{search}_{status_filter}_{dest_filter}_"
         f"{use_ec_api}_{use_euresearch}_{use_ufukavrupa}_{max_results}"
     )
 
