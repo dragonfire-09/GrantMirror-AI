@@ -903,6 +903,75 @@ def render_call_dashboard():
             use_container_width=True,
         )
 
+    # ─── AI CALL MATCHING ───
+st.markdown("### 🤖 AI ile En Uygun Çağrıları Bul")
+
+proposal_for_ranking = st.text_area(
+    "Proje özeti gir",
+    placeholder="Projenin amacını, teknolojisini, hedefini yaz...",
+    height=120,
+)
+
+if st.button("🎯 En Uygun Çağrıları Bul", use_container_width=True):
+
+    if not proposal_for_ranking.strip():
+        st.warning("Önce proje özeti gir")
+    else:
+        selected_call = None
+
+        with st.spinner("AI analiz yapıyor..."):
+
+            ranked_calls = rank_calls_with_ai(
+                proposal_text=proposal_for_ranking,
+                calls=calls,
+                llm_call=self._call_llm if hasattr(self, "_call_llm") else None,
+                top_k=10,
+            )
+
+        st.session_state["ranked_calls"] = ranked_calls
+
+
+# ─── SONUÇ GÖSTER ───
+ranked_calls = st.session_state.get("ranked_calls", [])
+
+if ranked_calls:
+    st.success(f"{len(ranked_calls)} en uygun çağrı bulundu")
+
+    for i, call in enumerate(ranked_calls, 1):
+
+        st.markdown(
+            f"""
+            <div style="
+                border:1px solid #d0d5dd;
+                border-radius:16px;
+                padding:16px;
+                margin-bottom:12px;
+                background:#ffffff;
+            ">
+                <div style="font-size:0.85rem;color:#667085;">
+                    #{i} · 🎯 {call.get('ai_match_score', 0)}/100 · {call.get('ai_fit_level', '')}
+                </div>
+
+                <div style="font-size:1.1rem;font-weight:700;color:#101828;">
+                    {call.get('call_id', '')}
+                </div>
+
+                <div style="margin-top:4px;">
+                    {call.get('title', '')}
+                </div>
+
+                <div style="font-size:0.85rem;color:#667085;margin-top:6px;">
+                    📅 {call.get('deadline', '')} · 🛰️ {call.get('source', '')}
+                </div>
+
+                <div style="margin-top:8px;">
+                    <b>Neden uygun:</b> {call.get('ai_match_reason', '')}
+                </div>
+            </div>
+            """,
+            unsafe_allow_html=True,
+        )
+
     except Exception as e:
         st.warning(f"Excel export hazırlanamadı: {e}")
 
