@@ -1547,18 +1547,19 @@ unsafe_allow_html=True,
 
         for warning in proposal.warnings:
             st.warning(warning)
+            
+st.divider()
+st.markdown("## 🚀 Değerlendirme")
 
-    st.divider()
+go = st.button(
+    "🔬 Analizi Başlat",
+    type="primary",
+    use_container_width=True,
+)
 
-    start_analysis = st.button(
-        "🚀 Analizi Başlat",
-        type="primary",
-        use_container_width=True,
-    )
-
-    if not start_analysis and "last_evaluation_results" not in st.session_state:
-        st.info("Belge hazır. Değerlendirme için **Analizi Başlat** butonuna basın.")
-        return
+if not go:
+    st.info("Belge hazır. Analizi başlatmak için butona basın.")
+    return
 
 
     # AI CALL MATCHING
