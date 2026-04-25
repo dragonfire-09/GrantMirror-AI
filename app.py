@@ -1698,7 +1698,7 @@ if not go:
         step[0] += 1
         pbar.progress(min(step[0] / ts, 1.0))
 
-        with st.spinner("🧠 AI değerlendirme yapıyor..."):
+    with st.spinner("🧠 AI değerlendirme yapıyor..."):
     results = ev.run(
         proposal,
         action,
