@@ -1515,7 +1515,7 @@ unsafe_allow_html=True,
         render_feature_dashboard()
         return
 
-    fb = uploaded.read()
+        fb = uploaded.read()
     fn = uploaded.name
 
     # ─────────────────────────────
@@ -1530,7 +1530,7 @@ unsafe_allow_html=True,
 
     st.success(f"✅ Belge yüklendi: {fn}")
 
-    with st.expander("📄 Belge Özeti", expanded=False):
+    with st.expander("📄 Belge Özeti", expanded=True):
         d1, d2, d3, d4 = st.columns(4)
 
         with d1:
@@ -1545,11 +1545,20 @@ unsafe_allow_html=True,
         with d4:
             st.metric("TRL", len(proposal.trl_mentions))
 
-        for s, d in proposal.sections.items():
-            st.write(f"- **{s.value}**: {d.word_count} kelime")
+        for warning in proposal.warnings:
+            st.warning(warning)
 
-        for w in proposal.warnings:
-            st.warning(w)
+    st.divider()
+
+    start_analysis = st.button(
+        "🚀 Analizi Başlat",
+        type="primary",
+        use_container_width=True,
+    )
+
+    if not start_analysis and "last_evaluation_results" not in st.session_state:
+        st.info("Belge hazır. Değerlendirme için **Analizi Başlat** butonuna basın.")
+        return
 
 
     # AI CALL MATCHING
