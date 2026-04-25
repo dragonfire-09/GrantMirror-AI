@@ -1684,9 +1684,16 @@ unsafe_allow_html=True,
         )
 
     
-    client = get_llm_client()
-    kb = HorizonKnowledgeBase()
-    ev = Evaluator(client, kb)
+client = get_llm_client()
+kb = HorizonKnowledgeBase()
+ev = Evaluator(client, kb)
+
+n = len(cfg.criteria)
+
+pbar = st.progress(0.0)
+stat_el = st.empty()
+step = [0]
+ts = n * 3
 
     pbar = st.progress(0.0)
     stat_el = st.empty()
