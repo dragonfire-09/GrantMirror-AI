@@ -1684,21 +1684,7 @@ if not go:
             (call_ctx_text + "\n\n" + manual_ctx) if call_ctx_text else manual_ctx
         )
 
-    # EVALUATE
-    st.divider()
-    st.markdown("## 🚀 Değerlendirme")
-    n = len(cfg.criteria)
-    cb, ci = st.columns([1, 2])
-    with cb:
-        go = st.button("🔬 Başlat", type="primary", use_container_width=True)
-    with ci:
-        cn = " + 📡 Çağrı" if call_ctx_text else ""
-        rn = " + 🧠 RAG" if use_ai_rag else ""
-        st.info(f"**{action.value}**: {n} kriter{cn}{rn} · ~{n * 30}-{n * 60}s")
-
-    if not go:
-        return
-
+    
     client = get_llm_client()
     kb = HorizonKnowledgeBase()
     ev = Evaluator(client, kb)
