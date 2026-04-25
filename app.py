@@ -1837,10 +1837,18 @@ unsafe_allow_html=True,
 
         st.progress(fp2 / 100)
 
-        st.write(
-            f"RAG: {use_ai_rag} | Match: {use_ai_match} | "
-            f"Model: {MODEL_NAME} | DB: {len(HORIZON_CALLS_DB)}"
-        )
+fetch_stats = st.session_state.get("last_fetch_stats", {})
+
+live_ec = fetch_stats.get("ec_api", 0)
+live_ua = fetch_stats.get("ufukavrupa", 0)
+live_eur = fetch_stats.get("euresearch", 0)
+
+st.write(
+    f"RAG: {use_ai_rag} | Match: {use_ai_match} | "
+    f"Model: {MODEL_NAME} | "
+    f"Local DB: {len(HORIZON_CALLS_DB)} | "
+    f"Live EC: {live_ec} | UA: {live_ua} | EUR: {live_eur}"
+)
 
         st.json(results)
         
