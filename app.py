@@ -1695,30 +1695,25 @@ stat_el = st.empty()
 step = [0]
 ts = n * 3
 
-    pbar = st.progress(0.0)
-    stat_el = st.empty()
-    step = [0]
-    ts = n * 3
+def on_p(msg):
+    stat_el.markdown(f"⏳ {msg}")
+    step[0] += 1
+    pbar.progress(min(step[0] / ts, 1.0))
 
-    def on_p(msg):
-        stat_el.markdown(f"⏳ {msg}")
-        step[0] += 1
-        pbar.progress(min(step[0] / ts, 1.0))
+with st.spinner("🧠 AI değerlendirme yapıyor..."):
+    results = ev.run(
+        proposal,
+        action,
+        call_ctx_text,
+        on_p,
+        use_ai_rag=use_ai_rag,
+    )
 
-    with st.spinner("🧠 AI değerlendirme yapıyor..."):
-        results = ev.run(
-            proposal,
-            action,
-            call_ctx_text,
-            on_p,
-            use_ai_rag=use_ai_rag,
-        )
-
-    pbar.progress(1.0)
-    stat_el.markdown("✅ Tamamlandı!")
-    time.sleep(0.5)
-    stat_el.empty()
-    pbar.empty()
+pbar.progress(1.0)
+stat_el.markdown("✅ Tamamlandı!")
+time.sleep(0.5)
+stat_el.empty()
+pbar.empty()
 
     st.divider()
     render_overall(results)
