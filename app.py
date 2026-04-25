@@ -1731,94 +1731,109 @@ unsafe_allow_html=True,
                 show_coach,
             )
 
-elig = run_eligibility_checks(proposal, action)
+    elig = run_eligibility_checks(proposal, action)
 
-st.markdown("## 📥 Raporları İndir")
+    st.markdown("## 📥 Raporları İndir")
 
-d1, d2, d3, d4 = st.columns(4)
+    d1, d2, d3, d4 = st.columns(4)
 
-ed = [
-    {
-        "check_name": ch.check_name,
-        "status": ch.status.value,
-        "message": ch.message,
-    }
-    for ch in elig.results
-]
+    ed = [
+        {
+            "check_name": ch.check_name,
+            "status": ch.status.value,
+            "message": ch.message,
+        }
+        for ch in elig.results
+    ]
 
-esr_md = generate_esr_report(results, ed)
-coach_md = generate_coaching_report(results)
-esr_pdf = markdown_to_pdf_bytes(esr_md)
+    esr_md = generate_esr_report(results, ed)
+    coach_md = generate_coaching_report(results)
+    esr_pdf = markdown_to_pdf_bytes(esr_md)
 
-with d1:
-    st.download_button(
-        label="📊 JSON",
-        data=json.dumps(results, indent=2, ensure_ascii=False),
-        file_name=f"gm_{fn}.json",
-        mime="application/json",
-        use_container_width=True,
-    )
+    with d1:
+        st.download_button(
+            label="📊 JSON",
+            data=json.dumps(results, indent=2, ensure_ascii=False),
+            file_name=f"gm_{fn}.json",
+            mime="application/json",
+            use_container_width=True,
+        )
 
-with d2:
-    st.download_button(
-        label="📄 ESR PDF",
-        data=esr_pdf,
-        file_name=f"gm_{fn}_esr.pdf",
-        mime="application/pdf",
-        use_container_width=True,
-    )
+    with d2:
+        st.download_button(
+            label="📄 ESR PDF",
+            data=esr_pdf,
+            file_name=f"gm_{fn}_esr.pdf",
+            mime="application/pdf",
+            use_container_width=True,
+        )
 
-with d3:
-    st.download_button(
-        label="📋 ESR MD",
-        data=esr_md,
-        file_name=f"gm_{fn}_esr.md",
-        mime="text/markdown",
-        use_container_width=True,
-    )
+    with d3:
+        st.download_button(
+            label="📋 ESR MD",
+            data=esr_md,
+            file_name=f"gm_{fn}_esr.md",
+            mime="text/markdown",
+            use_container_width=True,
+        )
 
-with d4:
-    st.download_button(
-        label="🎯 Koçluk",
-        data=coach_md,
-        file_name=f"gm_{fn}_coach.md",
-        mime="text/markdown",
-        use_container_width=True,
-    )
-    
+    with d4:
+        st.download_button(
+            label="🎯 Koçluk",
+            data=coach_md,
+            file_name=f"gm_{fn}_coach.md",
+            mime="text/markdown",
+            use_container_width=True,
+        )
+
     with st.expander("🔧 DEBUG"):
         dc1, dc2, dc3 = st.columns(3)
+
         with dc1:
             st.metric("Kelime", f"{proposal.total_words:,}")
             st.metric("Sayfa", proposal.total_pages)
+
         with dc2:
             st.metric("Bölüm", len(proposal.sections))
             st.metric("TRL", len(proposal.trl_mentions))
+
         with dc3:
             st.metric("KPI", len(proposal.kpi_mentions))
             st.metric("Partner", len(proposal.partner_names))
+
         if matches:
-            st.json({
-                "top": clean_html(matches[0].get("call_id", "?")),
-                "score": matches[0].get("ai_match_score", 0),
-            })
+            st.json(
+                {
+                    "top": clean_html(matches[0].get("call_id", "?")),
+                    "score": matches[0].get("ai_match_score", 0),
+                }
+            )
+
         if call_ctx_text:
             st.text_area(
-                "Bağlam", call_ctx_text[:1000], height=100, disabled=True,
+                "Bağlam",
+                call_ctx_text[:1000],
+                height=100,
+                disabled=True,
             )
+
         fp2 = results.get("funding_probability_pct", 0)
         tw2 = results.get("total_weighted", 0)
         tm2 = results.get("total_max", 0)
+
         st.write(
             f"Ratio: {tw2}/{tm2} = {tw2 / tm2 * 100:.1f}%"
             if tm2 > 0
             else "N/A"
         )
+
         st.progress(fp2 / 100)
+
         st.write(
             f"RAG: {use_ai_rag} | Match: {use_ai_match} | "
             f"Model: {MODEL_NAME} | DB: {len(HORIZON_CALLS_DB)}"
         )
+
         st.json(results)
         
 def render_calls_page():
