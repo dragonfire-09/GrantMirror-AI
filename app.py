@@ -1515,7 +1515,7 @@ unsafe_allow_html=True,
         render_feature_dashboard()
         return
 
-        fb = uploaded.read()
+    fb = uploaded.read()
     fn = uploaded.name
 
     # ─────────────────────────────
