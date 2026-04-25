@@ -1850,7 +1850,7 @@ st.write(
     f"Live EC: {live_ec} | UA: {live_ua} | EUR: {live_eur}"
 )
 
-        st.json(results)
+    st.json(results)
         
 def render_calls_page():
     st.title("📡 Canlı Çağrılar")
