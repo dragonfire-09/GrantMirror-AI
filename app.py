@@ -1548,19 +1548,18 @@ unsafe_allow_html=True,
         for warning in proposal.warnings:
             st.warning(warning)
             
-st.divider()
-st.markdown("## 🚀 Değerlendirme")
+    st.divider()
+    st.markdown("## 🚀 Değerlendirme")
 
-go = st.button(
-    "🔬 Analizi Başlat",
-    type="primary",
-    use_container_width=True,
-)
+    go = st.button(
+        "🔬 Analizi Başlat",
+        type="primary",
+        use_container_width=True,
+    )
 
-if not go:
-    st.info("Belge hazır. Analizi başlatmak için butona basın.")
-    return
-
+    if not go:
+        st.info("Belge hazır. Analizi başlatmak için butona basın.")
+        return
 
     # AI CALL MATCHING
     st.markdown("### 🎯 Otomatik Çağrı Eşleştirme")
