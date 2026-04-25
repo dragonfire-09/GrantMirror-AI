@@ -1684,7 +1684,7 @@ unsafe_allow_html=True,
         )
 
     
-        client = get_llm_client()
+    client = get_llm_client()
     kb = HorizonKnowledgeBase()
     ev = Evaluator(client, kb)
 
