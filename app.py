@@ -1702,6 +1702,7 @@ if not go:
     results = ev.run(
         proposal, action, call_ctx_text, on_p, use_ai_rag=use_ai_rag,
     )
+    
     pbar.progress(1.0)
     stat_el.markdown("✅ Tamamlandı!")
     time.sleep(0.5)
